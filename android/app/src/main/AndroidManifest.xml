@@ -35,6 +35,8 @@
             android:value="2" />
             
         <receiver android:name=".PhaseReceiver" android:exported="false" />
+        <receiver android:name=".NotificationActionReceiver" android:exported="false"/>
+        
     </application>
 
     <queries>

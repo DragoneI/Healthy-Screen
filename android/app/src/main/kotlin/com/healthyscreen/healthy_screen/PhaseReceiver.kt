@@ -11,15 +11,22 @@ class PhaseReceiver : BroadcastReceiver() {
 
         Thread {
             try {
-                // 1. Appliquer le fond d'écran et la luminosité
-                PhaseApplier.apply(ctx, phase)
+                // Rappel différé (bouton "Rappel dans 15 min") : notification seulement.
+                if (phase == "reminder") {
+                    if (!AutomationState.isPaused(ctx)) NotificationHelper.showBedtime(ctx)
+                    return@Thread
+                }
 
-                // 2. Ré-armer l'alarme pour le lendemain à la même heure
-                // (Par défaut : sunrise à 7h00, sunset à 19h00, night à 22h00)
-                when (phase) {
-                    "sunrise" -> AlarmScheduler.schedule(ctx, "sunrise", 7, 0)
-                    "sunset"  -> AlarmScheduler.schedule(ctx, "sunset", 19, 0)
-                    "night"   -> AlarmScheduler.schedule(ctx, "night", 22, 0)
+                // 1) On reprogramme TOUJOURS la prochaine alarme, avec les horaires de
+                //    l'utilisateur (plus de 7h/19h/22h en dur), même en pause : la chaîne
+                //    d'alarmes ne doit jamais se casser.
+                val (h, m) = AutomationState.time(ctx, phase)
+                AlarmScheduler.schedule(ctx, phase, h, m)
+
+                // 2) On n'applique le fond d'écran / la luminosité que si non en pause.
+                if (!AutomationState.isPaused(ctx)) {
+                    PhaseApplier.apply(ctx, phase)
+                    if (phase == "night") NotificationHelper.showBedtime(ctx)
                 }
             } finally {
                 pending.finish()

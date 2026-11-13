@@ -6,8 +6,8 @@ plugins {
 
 android {
     namespace = "com.healthyscreen.healthy_screen"
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = ""
+    compileSdk = 37
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
