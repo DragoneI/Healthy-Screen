@@ -11,6 +11,12 @@ class PhaseReceiver : BroadcastReceiver() {
 
         Thread {
             try {
+                // Fin d'une pause temporaire : on reprend et on réapplique la phase en cours.
+                if (phase == "resume") {
+                    PauseController.setPaused(ctx, 0L)
+                    return@Thread
+                }
+
                 // Rappel différé (bouton "Rappel dans 15 min") : notification seulement.
                 if (phase == "reminder") {
                     if (!AutomationState.isPaused(ctx)) NotificationHelper.showBedtime(ctx)

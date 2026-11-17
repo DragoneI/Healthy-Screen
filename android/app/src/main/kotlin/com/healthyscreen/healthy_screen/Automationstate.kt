@@ -46,4 +46,22 @@ object AutomationState {
         if (cal.timeInMillis <= System.currentTimeMillis()) cal.add(Calendar.DAY_OF_YEAR, 1)
         return cal.timeInMillis
     }
+
+    /** Luminosité de nuit choisie avec le curseur (10..255). */
+    fun nightBrightness(ctx: Context): Int =
+        prefs(ctx).getLong("flutter.night_brightness", 50L).toInt()
+
+    /** Phase correspondant à l'heure actuelle : "sunrise" (jour), "sunset" ou "night". */
+    fun currentPhase(ctx: Context): String {
+        val cal = Calendar.getInstance()
+        val now = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+        val (sh, sm) = time(ctx, "sunrise")
+        val (uh, um) = time(ctx, "sunset")
+        val (nh, nm) = time(ctx, "night")
+        return when {
+            now >= nh * 60 + nm || now < sh * 60 + sm -> "night"
+            now >= uh * 60 + um -> "sunset"
+            else -> "sunrise"
+        }
+    }
 }

@@ -1,7 +1,9 @@
 ﻿import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -39,7 +41,7 @@ class _Phase {
   final Color color;
 }
 
-// ───────────────────────── Page ─────────────────────────
+// ───────────────────────── Main Scaffold with Tabs ─────────────────────────
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -47,10 +49,64 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+class _HomePageState extends State<HomePage> {
+  int _currentIndex = 0;
+
+  final List<Widget> _pages = const [
+    _HomeDashboardTab(),
+    _PersonalSpaceTab(),
+    _WallpapersTab(),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _C.bg,
+      body: _pages[_currentIndex],
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: _C.stroke, width: 1)),
+        ),
+        child: BottomNavigationBar(
+          currentIndex: _currentIndex,
+          onTap: (index) => setState(() => _currentIndex = index),
+          backgroundColor: _C.card,
+          selectedItemColor: _C.accent,
+          unselectedItemColor: _C.muted,
+          type: BottomNavigationBarType.fixed,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.dashboard_rounded),
+              label: 'Accueil',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.person_outline_rounded),
+              label: 'Espace Perso',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.wallpaper_rounded),
+              label: 'Fonds d\'écran',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ───────────────────────── Tab 1 : Accueil / Dashboard ─────────────────────────
+class _HomeDashboardTab extends StatefulWidget {
+  const _HomeDashboardTab();
+
+  @override
+  State<_HomeDashboardTab> createState() => _HomeDashboardTabState();
+}
+
+class _HomeDashboardTabState extends State<_HomeDashboardTab> with WidgetsBindingObserver {
   final _bridge = NativeBridge();
   SharedPreferences? _prefs;
   Timer? _ticker;
+  Timer? _restoreTimer;
   DateTime _now = DateTime.now();
 
   TimeOfDay _sunrise = const TimeOfDay(hour: 7, minute: 0);
@@ -58,9 +114,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   TimeOfDay _night = const TimeOfDay(hour: 22, minute: 0);
   double _brightness = 50;
 
-  /// 0 = actif · -1 = en pause jusqu'à reprise manuelle · >0 = pause jusqu'à ce timestamp (ms)
   int _pauseUntil = 0;
-
   bool _write = false;
   bool _exact = false;
   bool _notif = false;
@@ -82,16 +136,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
+    _restoreTimer?.cancel();
     super.dispose();
   }
 
-  // Au retour des réglages Android ou d'une action de notification, on relit tout.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) _load();
   }
 
-  // ───────────── Données ─────────────
   Future<void> _load() async {
     final p = await SharedPreferences.getInstance();
     await p.reload();
@@ -127,7 +180,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     await p.setInt('night_minute', _night.minute);
     await p.setInt('night_brightness', _brightness.toInt());
 
-    // Les alarmes restent toujours armées : la pause est gérée côté Kotlin.
     await _bridge.saveSchedule(ScheduleConfig(
       sunriseHour: _sunrise.hour,
       sunriseMinute: _sunrise.minute,
@@ -141,10 +193,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _setPause(int value) async {
     setState(() => _pauseUntil = value);
-    await _prefs?.setInt('pause_until', value);
     HapticFeedback.mediumImpact();
-    if (value == 0) await _persist(); // ré-arme tout à la reprise
-    _toast(value == 0 ? 'Automatisation reprise' : 'Automatisation en pause');
+    await _bridge.setPaused(value);
+    _toast(value == 0
+        ? 'Automatisation reprise'
+        : 'En pause · fond d\'écran figé');
+  }
+
+  Future<void> _applyNight(TimeOfDay t) async {
+    if (!(_min(_sunset) < _min(t))) {
+      _toast('La nuit doit commencer après le coucher du soleil');
+      return;
+    }
+    setState(() => _night = t);
+    HapticFeedback.selectionClick();
+    await _persist();
   }
 
   DateTime _nextOccurrence(TimeOfDay t) {
@@ -154,7 +217,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return d;
   }
 
-  // ───────────── Interactions ─────────────
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -227,7 +289,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               Text('Mettre en pause', style: _t(20, w: FontWeight.w700)),
               const SizedBox(height: 4),
               Text(
-                'Le fond d\'écran et la luminosité ne changeront plus pendant ce temps.',
+                'Le fond d\'écran actuel sera figé et la luminosité ne changera plus.',
                 style: _t(13, c: _C.muted),
               ),
               const SizedBox(height: 12),
@@ -257,13 +319,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     await _setPause(until);
   }
 
-  Future<void> _askNotifications() async {
-    final status = await Permission.notification.request();
-    if (status.isPermanentlyDenied) await openAppSettings();
-    _load();
-  }
-
-  // ───────────── Calculs d'affichage ─────────────
   _Phase get _phase {
     final n = _now.hour * 60 + _now.minute;
     if (n >= _min(_night) || n < _min(_sunrise)) {
@@ -295,7 +350,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   String get _pauseLabel {
-    if (_pauseUntil == -1) return 'En pause jusqu\'à ce que vous repreniez';
+    if (_pauseUntil == -1) return 'En pause jusqu\'à reprise manuelle';
     final d = DateTime.fromMillisecondsSinceEpoch(_pauseUntil);
     final tomorrow = d.day != _now.day;
     return 'En pause jusqu\'à ${tomorrow ? 'demain ' : ''}${_hhmm(d.hour, d.minute)}';
@@ -308,33 +363,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return 'Bonsoir';
   }
 
-  // ───────────── UI ─────────────
   @override
   Widget build(BuildContext context) {
     final missing = [!_write, !_exact, !_notif].where((e) => e).length;
-    return Scaffold(
-      backgroundColor: _C.bg,
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-          children: [
-            Text(_greeting, style: _t(14, c: _C.muted)),
-            const SizedBox(height: 2),
-            Text('Healthy Screen', style: _t(28, w: FontWeight.w800, ls: -0.5)),
-            const SizedBox(height: 20),
-            _buildHero(),
+    return SafeArea(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        children: [
+          Text(_greeting, style: _t(14, c: _C.muted)),
+          const SizedBox(height: 2),
+          Text('Healthy Screen', style: _t(28, w: FontWeight.w800, ls: -0.5)),
+          const SizedBox(height: 20),
+          _buildHero(),
+          const SizedBox(height: 16),
+          _buildSmartTip(),
+          const SizedBox(height: 16),
+          if (missing > 0) ...[
+            _buildPermissions(missing),
             const SizedBox(height: 16),
-            if (missing > 0) ...[
-              _buildPermissions(missing),
-              const SizedBox(height: 16),
-            ],
-            _buildTimeline(),
-            const SizedBox(height: 16),
-            _buildSlots(),
-            const SizedBox(height: 16),
-            _buildBrightness(),
           ],
-        ),
+          _buildTimeline(),
+          const SizedBox(height: 16),
+          _buildSlots(),
+          const SizedBox(height: 16),
+          _buildBrightness(),
+        ],
       ),
     );
   }
@@ -432,6 +485,50 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
+  Widget _buildSmartTip() {
+    final bed = (_min(_sunrise) - 450 - 15) % 1440;
+    final nightStart = (bed - 60) % 1440;
+    final target = TimeOfDay(hour: nightStart ~/ 60, minute: nightStart % 60);
+    final already = _min(_night) == nightStart;
+
+    return _Card(
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+                color: _a(_C.accent, 0.15), borderRadius: BorderRadius.circular(14)),
+            child: const Icon(Icons.auto_awesome_rounded, color: _C.accent, size: 22),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Conseil sommeil', style: _t(15, w: FontWeight.w700)),
+                const SizedBox(height: 2),
+                Text(
+                  'Pour 5 cycles complets avant ${_hhmm(_sunrise.hour, _sunrise.minute)}, '
+                  'couchez-vous vers ${_hhmm(bed ~/ 60, bed % 60)}.',
+                  style: _t(12, c: _C.muted),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          already
+              ? const Icon(Icons.check_circle_rounded, color: _C.accent)
+              : TextButton(
+                  style: TextButton.styleFrom(foregroundColor: _C.accent),
+                  onPressed: () => _applyNight(target),
+                  child: Text('Nuit à ${_hhmm(target.hour, target.minute)}'),
+                ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildPermissions(int missing) {
     return _Card(
       child: Theme(
@@ -444,22 +541,24 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           collapsedIconColor: _C.muted,
           title: Text('Configuration requise ($missing)',
               style: _t(15, w: FontWeight.w700)),
-          subtitle: Text('Indispensable pour que tout fonctionne en arrière-plan',
+          subtitle: Text('Indispensable pour l\'arrière-plan',
               style: _t(12, c: _C.muted)),
           children: [
             if (!_write)
               _PermRow(
                   title: 'Modifier la luminosité',
-                  onTap: () async {
-                    await _bridge.openWriteSettings();
-                  }),
+                  onTap: () async => await NativeBridge().openWriteSettings()),
             if (!_exact)
               _PermRow(
                   title: 'Alarmes exactes',
+                  onTap: () async => await NativeBridge().openExactAlarmSettings()),
+            if (!_notif)
+              _PermRow(
+                  title: 'Notifications',
                   onTap: () async {
-                    await _bridge.openExactAlarmSettings();
+                    await Permission.notification.request();
+                    _load();
                   }),
-            if (!_notif) _PermRow(title: 'Notifications', onTap: _askNotifications),
           ],
         ),
       ),
@@ -553,10 +652,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               value: _brightness,
               min: 10,
               max: 255,
-              onChanged: (v) => setState(() => _brightness = v),
+              onChanged: (v) {
+                setState(() => _brightness = v);
+                _restoreTimer?.cancel();
+                _bridge.previewBrightness(v.toInt());
+              },
               onChangeEnd: (_) {
                 HapticFeedback.selectionClick();
                 _persist();
+                if (_phase.label != 'Nuit profonde') {
+                  _restoreTimer?.cancel();
+                  _restoreTimer = Timer(const Duration(milliseconds: 1500),
+                      () => _bridge.restoreBrightness());
+                }
               },
             ),
           ),
@@ -566,7 +674,481 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 }
 
-// ───────────────────────── Widgets ─────────────────────────
+// ───────────────────────── Tab 2 : Espace Personnel & Anti-Procrastination ─────────────────────────
+class _PersonalSpaceTab extends StatefulWidget {
+  const _PersonalSpaceTab();
+
+  @override
+  State<_PersonalSpaceTab> createState() => _PersonalSpaceTabState();
+}
+
+class _PersonalSpaceTabState extends State<_PersonalSpaceTab> {
+  final _bridge = NativeBridge();
+  bool _hasUsagePerm = false;
+  int _screenTimeMinutes = 0;
+  bool _antiProcrastinationActive = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkUsage();
+  }
+
+  Future<void> _checkUsage() async {
+    final perm = await _bridge.canAccessUsageStats();
+    int minutes = 0;
+    if (perm) {
+      minutes = await _bridge.getScreenTimeToday();
+    }
+    if (!mounted) return;
+    setState(() {
+      _hasUsagePerm = perm;
+      _screenTimeMinutes = minutes;
+    });
+  }
+
+  String _formatMinutes(int mins) {
+    final h = mins ~/ 60;
+    final m = mins % 60;
+    if (h == 0) return '$m min';
+    return '$h h ${m.toString().padLeft(2, '0')} min';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        children: [
+          Text('Mon Espace', style: _t(14, c: _C.muted)),
+          const SizedBox(height: 2),
+          Text('Bien-être & Suivi', style: _t(28, w: FontWeight.w800, ls: -0.5)),
+          const SizedBox(height: 20),
+
+          // ── Carte Temps d'écran ──
+          _Card(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: _a(_C.accent, 0.15),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(Icons.hourglass_bottom_rounded, color: _C.accent, size: 22),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Temps d\'écran aujourd\'hui', style: _t(15, w: FontWeight.w700)),
+                          const SizedBox(height: 2),
+                          Text('Suivi de votre utilisation quotidienne', style: _t(12, c: _C.muted)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                if (!_hasUsagePerm) ...[
+                  Text(
+                    'Pour afficher votre temps d\'écran réel, veuillez autoriser l\'accès aux statistiques d\'utilisation dans Android.',
+                    style: _t(13, c: _C.muted),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _C.accent,
+                        foregroundColor: Colors.black,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      onPressed: () async {
+                        await _bridge.openUsageAccessSettings();
+                      },
+                      child: const Text('Autoriser l\'accès'),
+                    ),
+                  ),
+                ] else ...[
+                  Center(
+                    child: Text(
+                      _formatMinutes(_screenTimeMinutes),
+                      style: _t(36, w: FontWeight.w800, c: _C.accent),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Center(
+                    child: Text(
+                      _screenTimeMinutes > 240 ? '⚠️ Temps d\'écran élevé aujourd\'hui' : '👍 Bonne gestion de votre temps',
+                      style: _t(13, c: _C.muted),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        side: BorderSide(color: _a(Colors.white, 0.2)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      onPressed: _checkUsage,
+                      child: const Text('Actualiser'),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // ── Mode Anti-Procrastination ──
+          _Card(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: _a(_C.dusk, 0.15),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(Icons.shield_rounded, color: _C.dusk, size: 22),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Mode Anti-Procrastination', style: _t(15, w: FontWeight.w700)),
+                          const SizedBox(height: 2),
+                          Text('Bloquer les distractions et filtrer les notifs', style: _t(12, c: _C.muted)),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      value: _antiProcrastinationActive,
+                      activeColor: _C.accent,
+                      onChanged: (v) {
+                        setState(() => _antiProcrastinationActive = v);
+                        HapticFeedback.mediumImpact();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(v ? 'Mode Concentration activé 🛡️' : 'Mode Concentration désactivé', style: _t(14)),
+                            backgroundColor: _C.card,
+                            duration: const Duration(seconds: 2),
+                            behavior: SnackBarBehavior.floating,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+                if (_antiProcrastinationActive) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: _C.bg,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: _C.stroke),
+                    ),
+                    child: Text(
+                      '🔒 Les notifications superflues sont filtrées et l\'affichage est optimisé pour le travail.',
+                      style: _t(13, c: _C.muted),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // ── Conseils Santé & Posture ──
+          _Card(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Conseils Santé & Posture', style: _t(15, w: FontWeight.w700)),
+                const SizedBox(height: 14),
+                _HealthTipRow(
+                  icon: Icons.visibility_rounded,
+                  title: 'Règle du 20-20-20',
+                  desc: 'Toutes les 20 minutes, regardez un objet à 20 pieds (6m) pendant 20 secondes pour reposer vos yeux.',
+                ),
+                const Divider(height: 24, color: _C.stroke),
+                _HealthTipRow(
+                  icon: Icons.water_drop_rounded,
+                  title: 'Hydratation',
+                  desc: 'Buvez un verre d\'eau toutes les 2 heures pour maintenir votre concentration au maximum.',
+                ),
+                const Divider(height: 24, color: _C.stroke),
+                _HealthTipRow(
+                  icon: Icons.accessibility_new_rounded,
+                  title: 'Posture & Étirements',
+                  desc: 'Pensez à relâcher vos épaules et à étirer votre nuque régulièrement lors de l\'utilisation prolongée.',
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HealthTipRow extends StatelessWidget {
+  const _HealthTipRow({required this.icon, required this.title, required this.desc});
+  final IconData icon;
+  final String title, desc;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: _C.accent, size: 20),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: _t(14, w: FontWeight.w700)),
+              const SizedBox(height: 2),
+              Text(desc, style: _t(12, c: _C.muted)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ───────────────────────── Tab 3 : Personnalisation des Fonds d'écran ─────────────────────────
+class _WallpapersTab extends StatefulWidget {
+  const _WallpapersTab();
+
+  @override
+  State<_WallpapersTab> createState() => _WallpapersTabState();
+}
+
+class _WallpapersTabState extends State<_WallpapersTab> {
+  String? _sunrisePath;
+  String? _sunsetPath;
+  String? _nightPath;
+  final _picker = ImagePicker();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPaths();
+  }
+
+  Future<void> _loadPaths() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _sunrisePath = prefs.getString('flutter.sunrise_wallpaper_path');
+      _sunsetPath = prefs.getString('flutter.sunset_wallpaper_path');
+      _nightPath = prefs.getString('flutter.night_wallpaper_path');
+    });
+  }
+
+  Future<void> _pickImage(String phase) async {
+    final pickedFile = await _picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('flutter.${phase}_wallpaper_path', pickedFile.path);
+
+    await _loadPaths();
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Fond d\'écran mis à jour avec succès !', style: _t(14)),
+        backgroundColor: _C.card,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+
+    // Réapplique immédiatement le fond si la phase correspond
+    // ou force une actualisation native
+    final bridge = NativeBridge();
+    await bridge.setPaused(0);
+  }
+
+  Future<void> _resetImage(String phase) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('flutter.${phase}_wallpaper_path');
+    await _loadPaths();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Retour au fond d\'écran par défaut', style: _t(14)),
+        backgroundColor: _C.card,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        children: [
+          Text('Personnalisation', style: _t(14, c: _C.muted)),
+          const SizedBox(height: 2),
+          Text('Fonds d\'écran', style: _t(28, w: FontWeight.w800, ls: -0.5)),
+          const SizedBox(height: 8),
+          Text(
+            'Choisissez vos propres images pour chaque phase de votre journée.',
+            style: _t(13, c: _C.muted),
+          ),
+          const SizedBox(height: 20),
+
+          _WallpaperCard(
+            title: 'Lever du soleil (Jour)',
+            subtitle: _sunrisePath != null ? 'Personnalisé depuis la galerie' : 'Fond par défaut de l\'app',
+            imagePath: _sunrisePath,
+            icon: Icons.wb_sunny_rounded,
+            color: _C.sun,
+            onPick: () => _pickImage('sunrise'),
+            onReset: _sunrisePath != null ? () => _resetImage('sunrise') : null,
+          ),
+          const SizedBox(height: 16),
+          _WallpaperCard(
+            title: 'Coucher du soleil (Soirée)',
+            subtitle: _sunsetPath != null ? 'Personnalisé depuis la galerie' : 'Fond par défaut de l\'app',
+            imagePath: _sunsetPath,
+            icon: Icons.wb_twilight_rounded,
+            color: _C.dusk,
+            onPick: () => _pickImage('sunset'),
+            onReset: _sunsetPath != null ? () => _resetImage('sunset') : null,
+          ),
+          const SizedBox(height: 16),
+          _WallpaperCard(
+            title: 'Nuit profonde',
+            subtitle: _nightPath != null ? 'Personnalisé depuis la galerie' : 'Fond par défaut de l\'app',
+            imagePath: _nightPath,
+            icon: Icons.bedtime_rounded,
+            color: _C.night,
+            onPick: () => _pickImage('night'),
+            onReset: _nightPath != null ? () => _resetImage('night') : null,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WallpaperCard extends StatelessWidget {
+  const _WallpaperCard({
+    required this.title,
+    required this.subtitle,
+    required this.imagePath,
+    required this.icon,
+    required this.color,
+    required this.onPick,
+    this.onReset,
+  });
+
+  final String title, subtitle;
+  final String? imagePath;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onPick;
+  final VoidCallback? onReset;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                    color: _a(color, 0.15), borderRadius: BorderRadius.circular(14)),
+                child: Icon(icon, color: color, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: _t(15, w: FontWeight.w700)),
+                    const SizedBox(height: 2),
+                    Text(subtitle, style: _t(12, c: _C.muted)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (imagePath != null) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Image.file(
+                File(imagePath!),
+                height: 140,
+                width: double.infinity,
+                fit: BoxFit.cover,
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _C.accent,
+                    foregroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: onPick,
+                  icon: const Icon(Icons.photo_library_rounded, size: 18),
+                  label: const Text('Choisir une photo'),
+                ),
+              ),
+              if (onReset != null) ...[
+                const SizedBox(width: 8),
+                IconButton(
+                  style: IconButton.styleFrom(
+                    backgroundColor: _C.bg,
+                    side: const BorderSide(color: _C.stroke),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: onReset,
+                  icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+                  tooltip: 'Réinitialiser',
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ───────────────────────── Widgets Communs ─────────────────────────
 class _Card extends StatelessWidget {
   const _Card({required this.child, this.padding = const EdgeInsets.all(20)});
   final Widget child;
@@ -678,7 +1260,6 @@ class _SheetOption extends StatelessWidget {
       );
 }
 
-/// Frise 24 h : nuit → lever → jour → coucher → nuit, avec repère "maintenant".
 class _DayBarPainter extends CustomPainter {
   _DayBarPainter(this.sr, this.ss, this.nt, this.now);
   final double sr, ss, nt, now;

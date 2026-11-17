@@ -62,6 +62,36 @@ class MainActivity: FlutterActivity() {
                     }
                     result.success(null)
                 }
+
+               // Dans MainActivity.kt, rajoute ces cas dans le MethodChannel :
+                    "canAccessUsageStats" -> {
+                     result.success(UsageStatsHelper.canAccessUsageStats(context))
+                }
+                    "openUsageAccessSettings" -> {
+                    val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                    startActivity(intent)
+                    result.success(null)
+               }
+                    "getScreenTimeToday" -> {
+                    result.success(UsageStatsHelper.getTodayScreenTimeMinutes(context))
+               }
+                // ── Nouveau : aperçu en direct de la luminosité (curseur) ──
+                "previewBrightness" -> {
+                    val level = call.argument<Number>("level")?.toInt() ?: 50
+                    PhaseApplier.previewBrightness(applicationContext, level)
+                    result.success(null)
+                }
+                // ── Nouveau : remet la luminosité d'avant l'aperçu ──
+                "restoreBrightness" -> {
+                    PhaseApplier.restoreBrightness(applicationContext)
+                    result.success(null)
+                }
+                // ── Nouveau : pause réelle (0 = reprise, -1 = manuelle, >0 = jusqu'à ce timestamp) ──
+                "setPaused" -> {
+                    val until = call.argument<Number>("untilMs")?.toLong() ?: 0L
+                    Thread { PauseController.setPaused(applicationContext, until) }.start()
+                    result.success(null)
+                }
                 else -> {
                     result.notImplemented()
                 }

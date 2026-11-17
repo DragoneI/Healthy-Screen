@@ -20,8 +20,16 @@ class NotificationActionReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         when (intent.action) {
             ACTION_SNOOZE -> scheduleReminder(ctx)
-            ACTION_PAUSE_UNTIL_MORNING ->
-                AutomationState.setPausedUntil(ctx, AutomationState.nextOccurrenceMs(ctx, "sunrise"))
+            ACTION_PAUSE_UNTIL_MORNING -> {
+                val pending = goAsync()
+                Thread {
+                    try {
+                        PauseController.setPaused(ctx, AutomationState.nextOccurrenceMs(ctx, "sunrise"))
+                    } finally {
+                        pending.finish()
+                    }
+                }.start()
+            }
         }
         NotificationManagerCompat.from(ctx).cancel(NotificationHelper.NOTIF_ID)
     }
