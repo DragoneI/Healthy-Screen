@@ -44,19 +44,67 @@ class NativeBridge {
     await _channel.invokeMethod('setPaused', {'untilMs': untilMs});
   }
 
-// ── Dans NativeBridge ──
-Future<bool> canAccessUsageStats() async {
-  final result = await _channel.invokeMethod<bool>('canAccessUsageStats');
-  return result ?? false;
+  // ───────── Fonds d'écran ─────────
+
+  /// Chemins des fonds personnalisés : original, sunrise, sunset, night (null = par défaut).
+  Future<Map<String, String?>> getWallpapers() async {
+    final r = await _channel.invokeMethod<Map>('getWallpapers');
+    return {
+      for (final e in (r ?? {}).entries) e.key as String: e.value as String?,
+    };
+  }
+
+  /// Copie et redimensionne l'image choisie ; retourne le nouveau chemin (ou null si échec).
+  Future<String?> importWallpaper(String slot, String path) async {
+    return _channel.invokeMethod<String>('importWallpaper', {'slot': slot, 'path': path});
+  }
+
+  Future<void> removeWallpaper(String slot) async {
+    await _channel.invokeMethod('removeWallpaper', {'slot': slot});
+  }
+
+  /// Applique tout de suite le fond d'une phase (sunrise / sunset / night).
+  Future<void> applyPhaseNow(String phase) async {
+    await _channel.invokeMethod('applyPhaseNow', {'phase': phase});
+  }
+
+  // ───────── Temps d'écran ─────────
+
+  Future<bool> hasUsageAccess() async {
+    return (await _channel.invokeMethod<bool>('hasUsageAccess')) ?? false;
+  }
+
+  Future<void> openUsageAccess() async {
+    await _channel.invokeMethod('openUsageAccess');
+  }
+
+  Future<ScreenTimeData?> getScreenTime() async {
+    final r = await _channel.invokeMethod<Map>('getScreenTime');
+    if (r == null) return null;
+    final daily = (r['daily'] as List).map((e) => (e as num).toInt()).toList();
+    final top = (r['top'] as List).map((e) {
+      final m = e as Map;
+      return (name: m['name'] as String, minutes: (m['minutes'] as num).toInt());
+    }).toList();
+    return ScreenTimeData(daily, top);
+  }
+
+  // ───────── Sessions focus ─────────
+
+  Future<void> startFocus(int minutes, int breakMinutes, String label) async {
+    await _channel.invokeMethod(
+        'startFocus', {'minutes': minutes, 'breakMinutes': breakMinutes, 'label': label});
+  }
+
+  Future<void> cancelFocus() async {
+    await _channel.invokeMethod('cancelFocus');
+  }
 }
 
-Future<void> openUsageAccessSettings() async {
-  await _channel.invokeMethod('openUsageAccessSettings');
-}
+class ScreenTimeData {
+  ScreenTimeData(this.daily, this.top);
 
-Future<int> getScreenTimeToday() async {
-  final result = await _channel.invokeMethod<int>('getScreenTimeToday');
-  return result ?? 0;
-}
-
+  /// Minutes d'utilisation par jour, du plus ancien (il y a 6 jours) à aujourd'hui.
+  final List<int> daily;
+  final List<({String name, int minutes})> top;
 }

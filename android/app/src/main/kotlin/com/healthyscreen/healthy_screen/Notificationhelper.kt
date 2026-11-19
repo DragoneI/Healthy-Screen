@@ -77,4 +77,45 @@ object NotificationHelper {
 
         NotificationManagerCompat.from(ctx).notify(NOTIF_ID, notification)
     }
+
+    private const val FOCUS_CHANNEL_ID = "focus_sessions"
+    private const val FOCUS_NOTIF_ID = 2002
+
+    fun showFocusEnd(ctx: Context, label: String, breakMin: Int) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) return
+
+        if (Build.VERSION.SDK_INT >= 26) {
+            val channel = NotificationChannel(
+                FOCUS_CHANNEL_ID,
+                "Sessions focus",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply { description = "Fin de vos sessions anti-procrastination" }
+            ctx.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+
+        val openApp = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)?.let {
+            PendingIntent.getActivity(ctx, 0, it, FLAGS)
+        }
+        val text = if (breakMin > 0) {
+            "Prenez $breakMin minutes de pause : levez-vous, buvez de l'eau, regardez au loin."
+        } else {
+            "Beau moment loin de l'écran. Reprenez quand vous êtes prêt."
+        }
+
+        val notification = NotificationCompat.Builder(ctx, FOCUS_CHANNEL_ID)
+            .setSmallIcon(ctx.applicationInfo.icon)
+            .setContentTitle("Session $label terminée 🎉")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setColor(0xFF2DD4BF.toInt())
+            .setAutoCancel(true)
+            .setContentIntent(openApp)
+            .build()
+
+        NotificationManagerCompat.from(ctx).notify(FOCUS_NOTIF_ID, notification)
+    }
 }

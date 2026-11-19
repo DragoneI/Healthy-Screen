@@ -11,6 +11,16 @@ class PhaseReceiver : BroadcastReceiver() {
 
         Thread {
             try {
+                // Fin d'une session focus : notification uniquement.
+                if (phase == "focus_end") {
+                    NotificationHelper.showFocusEnd(
+                        ctx,
+                        intent.getStringExtra("label") ?: "Focus",
+                        intent.getIntExtra("break", 0)
+                    )
+                    return@Thread
+                }
+
                 // Fin d'une pause temporaire : on reprend et on réapplique la phase en cours.
                 if (phase == "resume") {
                     PauseController.setPaused(ctx, 0L)

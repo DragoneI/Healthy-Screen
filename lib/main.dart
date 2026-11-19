@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'presentation/home_page.dart';
+import 'presentation/app_shell.dart';
 
 void main() {
   runApp(const HealthyScreenApp());
@@ -16,7 +17,7 @@ class HealthyScreenApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
         useMaterial3: true,
       ),
-      home: const HomePage(),
+      home: const AppShell(),   
     );
   }
 }

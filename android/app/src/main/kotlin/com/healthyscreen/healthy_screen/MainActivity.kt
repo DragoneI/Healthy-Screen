@@ -63,18 +63,6 @@ class MainActivity: FlutterActivity() {
                     result.success(null)
                 }
 
-               // Dans MainActivity.kt, rajoute ces cas dans le MethodChannel :
-                    "canAccessUsageStats" -> {
-                     result.success(UsageStatsHelper.canAccessUsageStats(context))
-                }
-                    "openUsageAccessSettings" -> {
-                    val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
-                    startActivity(intent)
-                    result.success(null)
-               }
-                    "getScreenTimeToday" -> {
-                    result.success(UsageStatsHelper.getTodayScreenTimeMinutes(context))
-               }
                 // ── Nouveau : aperçu en direct de la luminosité (curseur) ──
                 "previewBrightness" -> {
                     val level = call.argument<Number>("level")?.toInt() ?: 50
@@ -90,6 +78,68 @@ class MainActivity: FlutterActivity() {
                 "setPaused" -> {
                     val until = call.argument<Number>("untilMs")?.toLong() ?: 0L
                     Thread { PauseController.setPaused(applicationContext, until) }.start()
+                    result.success(null)
+                }
+                // ── Fonds d'écran personnalisés ──
+                "getWallpapers" -> {
+                    val slots = listOf("original", "sunrise", "sunset", "night")
+                    result.success(slots.associateWith { WallpaperStore.get(applicationContext, it)?.absolutePath })
+                }
+                "importWallpaper" -> {
+                    val slot = call.argument<String>("slot")
+                    val path = call.argument<String>("path")
+                    if (slot == null || path == null) {
+                        result.error("ARGS", "slot ou path manquant", null)
+                    } else {
+                        Thread {
+                            val out = try {
+                                WallpaperStore.importImage(applicationContext, slot, path)
+                            } catch (e: Exception) {
+                                null
+                            }
+                            runOnUiThread { result.success(out) }
+                        }.start()
+                    }
+                }
+                "removeWallpaper" -> {
+                    call.argument<String>("slot")?.let { WallpaperStore.remove(applicationContext, it) }
+                    result.success(null)
+                }
+                "applyPhaseNow" -> {
+                    val phase = call.argument<String>("phase") ?: "night"
+                    Thread { PhaseApplier.apply(applicationContext, phase) }.start()
+                    result.success(null)
+                }
+
+                // ── Temps d'écran ──
+                "hasUsageAccess" -> {
+                    result.success(UsageHelper.hasAccess(applicationContext))
+                }
+                "openUsageAccess" -> {
+                    startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                    result.success(null)
+                }
+                "getScreenTime" -> {
+                    Thread {
+                        val data = try {
+                            UsageHelper.weekly(applicationContext)
+                        } catch (e: Exception) {
+                            null
+                        }
+                        runOnUiThread { result.success(data) }
+                    }.start()
+                }
+
+                // ── Sessions focus ──
+                "startFocus" -> {
+                    val minutes = call.argument<Number>("minutes")?.toInt() ?: 25
+                    val breakMin = call.argument<Number>("breakMinutes")?.toInt() ?: 0
+                    val label = call.argument<String>("label") ?: "Focus"
+                    FocusController.start(applicationContext, minutes, breakMin, label)
+                    result.success(null)
+                }
+                "cancelFocus" -> {
+                    FocusController.cancel(applicationContext)
                     result.success(null)
                 }
                 else -> {
