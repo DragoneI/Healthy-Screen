@@ -1,8 +1,19 @@
 import 'package:flutter/material.dart';
-import 'presentation/home_page.dart';
+import 'package:flutter/services.dart';
+
 import 'presentation/app_shell.dart';
+import 'presentation/ui.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.dark,
+      systemNavigationBarColor: AppC.card,
+      systemNavigationBarIconBrightness: Brightness.dark,
+    ),
+  );
   runApp(const HealthyScreenApp());
 }
 
@@ -13,11 +24,17 @@ class HealthyScreenApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Healthy Screen',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
         useMaterial3: true,
+        scaffoldBackgroundColor: AppC.bg,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: AppC.indigo,
+          brightness: Brightness.light,
+          surface: AppC.card,
+        ),
       ),
-      home: const AppShell(),   
+      home: const AppShell(),
     );
   }
 }

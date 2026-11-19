@@ -1,4 +1,5 @@
 ﻿import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,39 +8,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/native_bridge.dart';
 import '../domain/schedule_config.dart';
-
-// ───────────────────────── Design tokens ─────────────────────────
-class _C {
-  static const bg = Color(0xFF0B1020);
-  static const card = Color(0xFF151B2E);
-  static const stroke = Color(0xFF232B45);
-  static const accent = Color(0xFF2DD4BF);
-  static const sun = Color(0xFFFBBF24);
-  static const dusk = Color(0xFFFB923C);
-  static const night = Color(0xFF818CF8);
-  static const muted = Color(0xFF8B93AD);
-}
-
-Color _a(Color c, double o) => c.withAlpha((o * 255).round());
-
-TextStyle _t(double s,
-        {FontWeight w = FontWeight.w500, Color c = Colors.white, double? ls}) =>
-    TextStyle(fontSize: s, fontWeight: w, color: c, letterSpacing: ls, height: 1.25);
-
-int _min(TimeOfDay t) => t.hour * 60 + t.minute;
-
-String _hhmm(int h, int m) =>
-    '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+import 'ui.dart';
 
 class _Phase {
-  const _Phase(this.label, this.subtitle, this.icon, this.color);
+  const _Phase(this.label, this.subtitle, this.icon, this.color, this.progress);
   final String label;
   final String subtitle;
   final IconData icon;
   final Color color;
+  final double progress;
 }
 
-// ───────────────────────── Page ─────────────────────────
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -59,7 +38,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   TimeOfDay _night = const TimeOfDay(hour: 22, minute: 0);
   double _brightness = 50;
 
-  /// 0 = actif · -1 = en pause jusqu'à reprise manuelle · >0 = pause jusqu'à ce timestamp (ms)
+  /// 0 = actif · -1 = pause manuelle · >0 = pause jusqu'à ce timestamp (ms)
   int _pauseUntil = 0;
 
   bool _write = false;
@@ -68,6 +47,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   bool get _paused =>
       _pauseUntil == -1 || _pauseUntil > _now.millisecondsSinceEpoch;
+
+  int _min(TimeOfDay t) => t.hour * 60 + t.minute;
 
   @override
   void initState() {
@@ -87,13 +68,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  // Au retour des réglages Android ou d'une action de notification, on relit tout.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) _load();
   }
 
-  // ───────────── Données ─────────────
   Future<void> _load() async {
     final p = await SharedPreferences.getInstance();
     await p.reload();
@@ -105,11 +84,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _prefs = p;
       _now = DateTime.now();
       _sunrise = TimeOfDay(
-          hour: p.getInt('sunrise_hour') ?? 7, minute: p.getInt('sunrise_minute') ?? 0);
+        hour: p.getInt('sunrise_hour') ?? 7,
+        minute: p.getInt('sunrise_minute') ?? 0,
+      );
       _sunset = TimeOfDay(
-          hour: p.getInt('sunset_hour') ?? 19, minute: p.getInt('sunset_minute') ?? 0);
+        hour: p.getInt('sunset_hour') ?? 19,
+        minute: p.getInt('sunset_minute') ?? 0,
+      );
       _night = TimeOfDay(
-          hour: p.getInt('night_hour') ?? 22, minute: p.getInt('night_minute') ?? 0);
+        hour: p.getInt('night_hour') ?? 22,
+        minute: p.getInt('night_minute') ?? 0,
+      );
       _brightness = (p.getInt('night_brightness') ?? 50).toDouble();
       _pauseUntil = p.getInt('pause_until') ?? 0;
       _write = write;
@@ -129,35 +114,39 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     await p.setInt('night_minute', _night.minute);
     await p.setInt('night_brightness', _brightness.toInt());
 
-    // Les alarmes restent toujours armées : la pause est gérée côté Kotlin.
-    await _bridge.saveSchedule(ScheduleConfig(
-      sunriseHour: _sunrise.hour,
-      sunriseMinute: _sunrise.minute,
-      sunsetHour: _sunset.hour,
-      sunsetMinute: _sunset.minute,
-      nightHour: _night.hour,
-      nightMinute: _night.minute,
-      nightBrightness: _brightness.toInt(),
-    ));
+    await _bridge.saveSchedule(
+      ScheduleConfig(
+        sunriseHour: _sunrise.hour,
+        sunriseMinute: _sunrise.minute,
+        sunsetHour: _sunset.hour,
+        sunsetMinute: _sunset.minute,
+        nightHour: _night.hour,
+        nightMinute: _night.minute,
+        nightBrightness: _brightness.toInt(),
+      ),
+    );
   }
 
   Future<void> _setPause(int value) async {
     setState(() => _pauseUntil = value);
     HapticFeedback.mediumImpact();
-    // Côté Android : écrit l'état, retire le fond d'écran (pause) ou le réapplique (reprise),
-    // et programme la reprise automatique si la pause est temporaire.
     await _bridge.setPaused(value);
-    final hasOriginal = value == 0 || (await _bridge.getWallpapers())['original'] != null;
-    _toast(value == 0
-        ? 'Automatisation reprise · fond d\'écran réappliqué'
-        : hasOriginal
-            ? 'En pause · votre fond habituel est remis'
-            : 'En pause · fond par défaut remis. Choisissez « Mon fond habituel » dans l\'onglet Fonds');
+    final hasOriginal =
+        value == 0 || (await _bridge.getWallpapers())['original'] != null;
+    if (!mounted) return;
+    showToast(
+      context,
+      value == 0
+          ? 'Automatisation reprise · fond d\'écran réappliqué'
+          : hasOriginal
+              ? 'En pause · votre fond habituel est remis'
+              : 'En pause · fond par défaut remis. Choisissez « Mon fond habituel » dans l\'onglet Fonds',
+    );
   }
 
   Future<void> _applyNight(TimeOfDay t) async {
     if (!(_min(_sunset) < _min(t))) {
-      _toast('La nuit doit commencer après le coucher du soleil');
+      showToast(context, 'La nuit doit commencer après le coucher du soleil');
       return;
     }
     setState(() => _night = t);
@@ -172,20 +161,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return d;
   }
 
-  // ───────────── Interactions ─────────────
-  void _toast(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(msg, style: _t(14)),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: _C.card,
-        duration: const Duration(seconds: 2),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      ));
-  }
-
   Future<void> _pickTime(String which) async {
     final current = switch (which) {
       'sunrise' => _sunrise,
@@ -196,19 +171,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       context: context,
       initialTime: current,
       builder: (ctx, child) => Theme(
-        data: ThemeData.dark().copyWith(
-          colorScheme: const ColorScheme.dark(primary: _C.accent, surface: _C.card),
+        data: ThemeData.light().copyWith(
+          colorScheme: const ColorScheme.light(
+            primary: AppC.indigo,
+            surface: AppC.card,
+          ),
         ),
         child: child!,
       ),
     );
-    if (picked == null) return;
+    if (picked == null || !mounted) return;
 
     final sr = which == 'sunrise' ? picked : _sunrise;
     final ss = which == 'sunset' ? picked : _sunset;
     final nt = which == 'night' ? picked : _night;
     if (!(_min(sr) < _min(ss) && _min(ss) < _min(nt))) {
-      _toast('Ordre attendu : lever → coucher → nuit');
+      showToast(context, 'Ordre attendu : lever → coucher → nuit');
       return;
     }
     setState(() {
@@ -223,9 +201,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _showPauseSheet() async {
     final choice = await showModalBottomSheet<int>(
       context: context,
-      backgroundColor: _C.card,
+      backgroundColor: AppC.card,
       shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
       builder: (ctx) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
@@ -238,29 +217,34 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                      color: _C.stroke, borderRadius: BorderRadius.circular(2)),
+                    color: AppC.stroke,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
-              Text('Mettre en pause', style: _t(20, w: FontWeight.w700)),
+              Text('Mettre en pause', style: tx(20, w: FontWeight.w700)),
               const SizedBox(height: 4),
               Text(
                 'Le fond d\'écran et la luminosité ne changeront plus pendant ce temps.',
-                style: _t(13, c: _C.muted),
+                style: tx(13, c: AppC.muted),
               ),
               const SizedBox(height: 12),
               _SheetOption(
-                  icon: Icons.timer_outlined,
-                  label: '1 heure',
-                  onTap: () => Navigator.pop(ctx, 1)),
+                icon: Icons.timer_outlined,
+                label: '1 heure',
+                onTap: () => Navigator.pop(ctx, 1),
+              ),
               _SheetOption(
-                  icon: Icons.wb_twilight_rounded,
-                  label: 'Jusqu\'à demain matin',
-                  onTap: () => Navigator.pop(ctx, 2)),
+                icon: Icons.wb_twilight_rounded,
+                label: 'Jusqu\'à demain matin',
+                onTap: () => Navigator.pop(ctx, 2),
+              ),
               _SheetOption(
-                  icon: Icons.all_inclusive_rounded,
-                  label: 'Jusqu\'à ce que je reprenne',
-                  onTap: () => Navigator.pop(ctx, 3)),
+                icon: Icons.all_inclusive_rounded,
+                label: 'Jusqu\'à ce que je reprenne',
+                onTap: () => Navigator.pop(ctx, 3),
+              ),
             ],
           ),
         ),
@@ -281,19 +265,48 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _load();
   }
 
-  // ───────────── Calculs d'affichage ─────────────
+  Future<void> _previewPhase(String phase, String label) async {
+    HapticFeedback.selectionClick();
+    await _bridge.applyPhaseNow(phase);
+    if (mounted) showToast(context, 'Phase « $label » appliquée');
+  }
+
+  // ───────────── Calculs ─────────────
   _Phase get _phase {
     final n = _now.hour * 60 + _now.minute;
-    if (n >= _min(_night) || n < _min(_sunrise)) {
-      return const _Phase('Nuit profonde', 'Écran apaisé pour préparer le sommeil',
-          Icons.bedtime_rounded, _C.night);
+    final sr = _min(_sunrise);
+    final ss = _min(_sunset);
+    final nt = _min(_night);
+
+    if (n >= nt || n < sr) {
+      final nightSpan = ((1440 - nt) + sr).clamp(1, 1440);
+      final elapsed = n >= nt ? (n - nt) : ((1440 - nt) + n);
+      return _Phase(
+        'Nuit profonde',
+        'Écran apaisé pour préparer le sommeil',
+        Icons.bedtime_rounded,
+        AppC.night,
+        (elapsed / nightSpan).clamp(0.08, 1.0),
+      );
     }
-    if (n >= _min(_sunset)) {
-      return const _Phase('Soirée douce', 'Transition en douceur vers la nuit',
-          Icons.wb_twilight_rounded, _C.dusk);
+    if (n >= ss) {
+      final span = (nt - ss).clamp(1, 1440);
+      return _Phase(
+        'Soirée douce',
+        'Transition en douceur vers la nuit',
+        Icons.wb_twilight_rounded,
+        AppC.dusk,
+        ((n - ss) / span).clamp(0.08, 1.0),
+      );
     }
-    return const _Phase('Journée lumineuse', 'Écran à pleine énergie',
-        Icons.wb_sunny_rounded, _C.sun);
+    final span = (ss - sr).clamp(1, 1440);
+    return _Phase(
+      'Journée lumineuse',
+      'Écran à pleine énergie',
+      Icons.wb_sunny_rounded,
+      AppC.sun,
+      ((n - sr) / span).clamp(0.08, 1.0),
+    );
   }
 
   (String, DateTime) get _next {
@@ -313,10 +326,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   String get _pauseLabel {
-    if (_pauseUntil == -1) return 'En pause jusqu\'à ce que vous repreniez';
+    if (_pauseUntil == -1) return 'Pause manuelle active';
     final d = DateTime.fromMillisecondsSinceEpoch(_pauseUntil);
     final tomorrow = d.day != _now.day;
-    return 'En pause jusqu\'à ${tomorrow ? 'demain ' : ''}${_hhmm(d.hour, d.minute)}';
+    return 'Jusqu\'à ${tomorrow ? 'demain ' : ''}${hhmm(d.hour, d.minute)}';
   }
 
   String get _greeting {
@@ -330,52 +343,212 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final missing = [!_write, !_exact, !_notif].where((e) => e).length;
-    return Scaffold(
-      backgroundColor: _C.bg,
-      body: SafeArea(
-        child: ListView(
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        _buildTopHeroHeader(),
+        Padding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-          children: [
-            Text(_greeting, style: _t(14, c: _C.muted)),
-            const SizedBox(height: 2),
-            Text('Healthy Screen', style: _t(28, w: FontWeight.w800, ls: -0.5)),
-            const SizedBox(height: 20),
-            _buildHero(),
-            const SizedBox(height: 16),
-            _buildSmartTip(),
-            const SizedBox(height: 16),
-            if (missing > 0) ...[
-              _buildPermissions(missing),
+          child: Column(
+            children: [
+              _buildSmartTipCard(),
               const SizedBox(height: 16),
+              _buildQuickActions(),
+              const SizedBox(height: 16),
+              if (missing > 0) ...[
+                _buildPermissions(missing),
+                const SizedBox(height: 16),
+              ],
+              _buildTimeline(),
+              const SizedBox(height: 16),
+              _buildSlots(),
+              const SizedBox(height: 16),
+              _buildBrightness(),
             ],
-            _buildTimeline(),
-            const SizedBox(height: 16),
-            _buildSlots(),
-            const SizedBox(height: 16),
-            _buildBrightness(),
-          ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTopHeroHeader() {
+    final phase = _phase;
+    final accent = _paused ? AppC.muted : phase.color;
+    final next = _next;
+    final remaining = next.$2.difference(_now);
+    final scoreValue = _paused
+        ? 'PAUSE'
+        : '${(phase.progress * 100).round()}%';
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [AppC.bgTop, withA(AppC.bgTop, 0.35), AppC.bg],
+          stops: const [0.0, 0.65, 1.0],
+        ),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(_greeting, style: tx(13, c: AppC.muted)),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Healthy Screen',
+                          style: tx(26, w: FontWeight.w800, ls: -0.5),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: AppC.card,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: withA(const Color(0xFF2D3766), 0.05),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _paused ? Icons.pause_circle_filled : phase.icon,
+                          size: 16,
+                          color: accent,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          _paused ? 'En pause' : phase.label,
+                          style: tx(12, w: FontWeight.w700, c: AppC.ink),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 22),
+
+              // Jauge circulaire centrale inspirée d'Envol
+              SizedBox(
+                width: 158,
+                height: 158,
+                child: CustomPaint(
+                  painter: _RhythmRingPainter(
+                    progress: _paused ? 0.0 : phase.progress,
+                    color: accent,
+                  ),
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _paused ? 'Pause' : 'Rythme',
+                          style: tx(12, w: FontWeight.w600, c: AppC.muted),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          scoreValue,
+                          style: tx(
+                            _paused ? 22 : 28,
+                            w: FontWeight.w800,
+                            ls: -0.6,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _paused ? _pauseLabel : 'dans ${_fmtDuration(remaining)}',
+                          style: tx(11, w: FontWeight.w600, c: accent),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                _paused
+                    ? 'Votre fond habituel est restauré pendant la pause.'
+                    : '${phase.subtitle} · ${next.$1} dans ${_fmtDuration(remaining)}',
+                textAlign: TextAlign.center,
+                style: tx(12, c: AppC.muted),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: _paused
+                    ? FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppC.indigo,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                        ),
+                        onPressed: () => _setPause(0),
+                        icon: const Icon(Icons.play_arrow_rounded),
+                        label: const Text('Reprendre l\'automatisation'),
+                      )
+                    : FilledButton.tonalIcon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppC.card,
+                          foregroundColor: AppC.ink,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                        ),
+                        onPressed: _showPauseSheet,
+                        icon: const Icon(Icons.pause_rounded, color: AppC.indigo),
+                        label: const Text('Mettre en pause'),
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildHero() {
-    final phase = _phase;
-    final color = _paused ? Colors.grey : phase.color;
-    final next = _next;
-    final remaining = next.$2.difference(_now);
+  /// Carte conseil en indigo/violet inspirée de "Personal tip" dans Envol
+  Widget _buildSmartTipCard() {
+    final bed = (_min(_sunrise) - 450 - 15) % 1440;
+    final nightStart = (bed - 60) % 1440;
+    final target = TimeOfDay(hour: nightStart ~/ 60, minute: nightStart % 60);
+    final already = _min(_night) == nightStart;
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 400),
+    return Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        gradient: LinearGradient(
+        borderRadius: BorderRadius.circular(24),
+        gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [_a(color, 0.28), _a(color, 0.06)],
+          colors: [Color(0xFF6B5CE7), Color(0xFF5344C9)],
         ),
-        border: Border.all(color: _a(color, 0.35)),
+        boxShadow: [
+          BoxShadow(
+            color: withA(const Color(0xFF5344C9), 0.25),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -383,68 +556,67 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           Row(
             children: [
               Container(
-                width: 52,
-                height: 52,
+                width: 30,
+                height: 30,
                 decoration: BoxDecoration(
-                    shape: BoxShape.circle, color: _a(color, 0.2)),
-                child: Icon(_paused ? Icons.pause_rounded : phase.icon,
-                    color: color, size: 28),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_paused ? 'Automatisation en pause' : phase.label,
-                        style: _t(18, w: FontWeight.w700)),
-                    const SizedBox(height: 2),
-                    Text(_paused ? _pauseLabel : phase.subtitle,
-                        style: _t(13, c: _C.muted)),
-                  ],
+                  color: withA(Colors.white, 0.18),
+                  shape: BoxShape.circle,
                 ),
+                child: const Icon(
+                  Icons.bedtime_outlined,
+                  color: Colors.white,
+                  size: 16,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Conseil sommeil',
+                style: tx(13, w: FontWeight.w700, c: withA(Colors.white, 0.9)),
               ),
             ],
           ),
-          const SizedBox(height: 18),
-          Row(
-            children: [
-              Icon(Icons.schedule_rounded, size: 16, color: _C.muted),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  '${next.$1} dans ${_fmtDuration(remaining)}',
-                  style: _t(13, c: _C.muted),
-                ),
-              ),
-            ],
+          const SizedBox(height: 12),
+          Text(
+            'Pour 5 cycles complets avant ${hhmm(_sunrise.hour, _sunrise.minute)}, '
+            'couchez-vous vers ${hhmm(bed ~/ 60, bed % 60)}.',
+            style: tx(14, w: FontWeight.w500, c: Colors.white, h: 1.4),
           ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: _paused
-                ? FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _C.accent,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16)),
+          const SizedBox(height: 14),
+          Align(
+            alignment: Alignment.centerRight,
+            child: already
+                ? Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: withA(Colors.white, 0.16),
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                    onPressed: () => _setPause(0),
-                    icon: const Icon(Icons.play_arrow_rounded),
-                    label: const Text('Reprendre maintenant'),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.check_circle, color: Colors.white, size: 15),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Nuit réglée à ${hhmm(target.hour, target.minute)}',
+                          style: tx(12, w: FontWeight.w600, c: Colors.white),
+                        ),
+                      ],
+                    ),
                   )
-                : OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
+                : TextButton(
+                    style: TextButton.styleFrom(
+                      backgroundColor: withA(Colors.white, 0.18),
                       foregroundColor: Colors.white,
-                      side: BorderSide(color: _a(Colors.white, 0.25)),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16)),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
-                    onPressed: _showPauseSheet,
-                    icon: const Icon(Icons.pause_rounded),
-                    label: const Text('Mettre en pause'),
+                    onPressed: () => _applyNight(target),
+                    child: Text(
+                      'Passer nuit à ${hhmm(target.hour, target.minute)}',
+                      style: tx(12, w: FontWeight.w700, c: Colors.white),
+                    ),
                   ),
           ),
         ],
@@ -452,79 +624,78 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  /// Conseil calculé : 5 cycles de 90 min + ~15 min pour s'endormir, avant le lever.
-  Widget _buildSmartTip() {
-    final bed = (_min(_sunrise) - 450 - 15) % 1440;
-    final nightStart = (bed - 60) % 1440;
-    final target = TimeOfDay(hour: nightStart ~/ 60, minute: nightStart % 60);
-    final already = _min(_night) == nightStart;
-
-    return _Card(
-      child: Row(
+  /// Raccourcis circulaires rapides inspirés des icônes circulaires d'Envol
+  Widget _buildQuickActions() {
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-                color: _a(_C.accent, 0.15), borderRadius: BorderRadius.circular(14)),
-            child: const Icon(Icons.auto_awesome_rounded, color: _C.accent, size: 22),
+          Text('Tester une ambiance', style: tx(15, w: FontWeight.w700)),
+          const SizedBox(height: 4),
+          Text(
+            'Appliquez instantanément le fond d\'écran d\'une phase',
+            style: tx(12, c: AppC.muted),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Conseil sommeil', style: _t(15, w: FontWeight.w700)),
-                const SizedBox(height: 2),
-                Text(
-                  'Pour 5 cycles complets avant ${_hhmm(_sunrise.hour, _sunrise.minute)}, '
-                  'couchez-vous vers ${_hhmm(bed ~/ 60, bed % 60)}.',
-                  style: _t(12, c: _C.muted),
-                ),
-              ],
-            ),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _CircleAction(
+                icon: Icons.wb_sunny_rounded,
+                label: 'Matin',
+                color: AppC.sun,
+                onTap: () => _previewPhase('sunrise', 'Lever du soleil'),
+              ),
+              _CircleAction(
+                icon: Icons.wb_twilight_rounded,
+                label: 'Soirée',
+                color: AppC.dusk,
+                onTap: () => _previewPhase('sunset', 'Coucher du soleil'),
+              ),
+              _CircleAction(
+                icon: Icons.bedtime_rounded,
+                label: 'Nuit',
+                color: AppC.night,
+                onTap: () => _previewPhase('night', 'Nuit profonde'),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          already
-              ? const Icon(Icons.check_circle_rounded, color: _C.accent)
-              : TextButton(
-                  style: TextButton.styleFrom(foregroundColor: _C.accent),
-                  onPressed: () => _applyNight(target),
-                  child: Text('Nuit à ${_hhmm(target.hour, target.minute)}'),
-                ),
         ],
       ),
     );
   }
 
   Widget _buildPermissions(int missing) {
-    return _Card(
+    return AppCard(
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
           initiallyExpanded: true,
           tilePadding: EdgeInsets.zero,
           childrenPadding: EdgeInsets.zero,
-          iconColor: _C.muted,
-          collapsedIconColor: _C.muted,
-          title: Text('Configuration requise ($missing)',
-              style: _t(15, w: FontWeight.w700)),
-          subtitle: Text('Indispensable pour que tout fonctionne en arrière-plan',
-              style: _t(12, c: _C.muted)),
+          iconColor: AppC.muted,
+          collapsedIconColor: AppC.muted,
+          title: Text('Configuration requise ($missing)', style: tx(15, w: FontWeight.w700)),
+          subtitle: Text(
+            'Indispensable pour que tout fonctionne en arrière-plan',
+            style: tx(12, c: AppC.muted),
+          ),
           children: [
             if (!_write)
               _PermRow(
-                  title: 'Modifier la luminosité',
-                  onTap: () async {
-                    await _bridge.openWriteSettings();
-                  }),
+                title: 'Modifier la luminosité',
+                onTap: () => _bridge.openWriteSettings(),
+              ),
             if (!_exact)
               _PermRow(
-                  title: 'Alarmes exactes',
-                  onTap: () async {
-                    await _bridge.openExactAlarmSettings();
-                  }),
-            if (!_notif) _PermRow(title: 'Notifications', onTap: _askNotifications),
+                title: 'Alarmes exactes',
+                onTap: () => _bridge.openExactAlarmSettings(),
+              ),
+            if (!_notif)
+              _PermRow(
+                title: 'Notifications',
+                onTap: _askNotifications,
+              ),
           ],
         ),
       ),
@@ -534,23 +705,24 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget _buildTimeline() {
     double f(TimeOfDay t) => _min(t) / 1440;
     final nowF = (_now.hour * 60 + _now.minute) / 1440;
-    return _Card(
+    return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Votre journée', style: _t(15, w: FontWeight.w700)),
+          Text('Votre journée', style: tx(15, w: FontWeight.w700)),
           const SizedBox(height: 16),
           SizedBox(
             height: 36,
             width: double.infinity,
             child: CustomPaint(
-                painter: _DayBarPainter(f(_sunrise), f(_sunset), f(_night), nowF)),
+              painter: _DayBarPainter(f(_sunrise), f(_sunset), f(_night), nowF),
+            ),
           ),
           const SizedBox(height: 6),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: ['0h', '6h', '12h', '18h', '24h']
-                .map((e) => Text(e, style: _t(11, c: _C.muted)))
+                .map((e) => Text(e, style: tx(11, c: AppC.muted)))
                 .toList(),
           ),
         ],
@@ -559,33 +731,36 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Widget _buildSlots() {
-    return _Card(
+    return AppCard(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
         children: [
           _SlotTile(
-              icon: Icons.wb_sunny_rounded,
-              color: _C.sun,
-              title: 'Lever du soleil',
-              subtitle: 'Fond lumineux, luminosité auto',
-              time: _hhmm(_sunrise.hour, _sunrise.minute),
-              onTap: () => _pickTime('sunrise')),
-          const Divider(height: 1, color: _C.stroke, indent: 72),
+            icon: Icons.wb_sunny_rounded,
+            color: AppC.sun,
+            title: 'Lever du soleil',
+            subtitle: 'Fond lumineux, luminosité auto',
+            time: hhmm(_sunrise.hour, _sunrise.minute),
+            onTap: () => _pickTime('sunrise'),
+          ),
+          const Divider(height: 1, color: AppC.stroke, indent: 72),
           _SlotTile(
-              icon: Icons.wb_twilight_rounded,
-              color: _C.dusk,
-              title: 'Coucher du soleil',
-              subtitle: 'Tons chauds, transition douce',
-              time: _hhmm(_sunset.hour, _sunset.minute),
-              onTap: () => _pickTime('sunset')),
-          const Divider(height: 1, color: _C.stroke, indent: 72),
+            icon: Icons.wb_twilight_rounded,
+            color: AppC.dusk,
+            title: 'Coucher du soleil',
+            subtitle: 'Tons chauds, transition douce',
+            time: hhmm(_sunset.hour, _sunset.minute),
+            onTap: () => _pickTime('sunset'),
+          ),
+          const Divider(height: 1, color: AppC.stroke, indent: 72),
           _SlotTile(
-              icon: Icons.bedtime_rounded,
-              color: _C.night,
-              title: 'Nuit profonde',
-              subtitle: 'Fond sombre, basse luminosité',
-              time: _hhmm(_night.hour, _night.minute),
-              onTap: () => _pickTime('night')),
+            icon: Icons.bedtime_rounded,
+            color: AppC.night,
+            title: 'Nuit profonde',
+            subtitle: 'Fond sombre, basse luminosité',
+            time: hhmm(_night.hour, _night.minute),
+            onTap: () => _pickTime('night'),
+          ),
         ],
       ),
     );
@@ -593,26 +768,26 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Widget _buildBrightness() {
     final pct = (_brightness / 255 * 100).round();
-    return _Card(
+    return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Expanded(
-                  child: Text('Luminosité de nuit',
-                      style: _t(15, w: FontWeight.w700))),
-              Text('$pct %', style: _t(15, w: FontWeight.w800, c: _C.accent)),
+                child: Text('Luminosité de nuit', style: tx(15, w: FontWeight.w700)),
+              ),
+              Text('$pct %', style: tx(15, w: FontWeight.w800, c: AppC.indigo)),
             ],
           ),
           const SizedBox(height: 4),
           SliderTheme(
             data: SliderThemeData(
               trackHeight: 6,
-              activeTrackColor: _C.accent,
-              inactiveTrackColor: _C.stroke,
-              thumbColor: _C.accent,
-              overlayColor: _a(_C.accent, 0.15),
+              activeTrackColor: AppC.indigo,
+              inactiveTrackColor: AppC.cardTint,
+              thumbColor: AppC.indigo,
+              overlayColor: withA(AppC.indigo, 0.15),
             ),
             child: Slider(
               value: _brightness,
@@ -621,17 +796,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               onChanged: (v) {
                 setState(() => _brightness = v);
                 _restoreTimer?.cancel();
-                // Aperçu immédiat sur le téléphone
                 _bridge.previewBrightness(v.toInt());
               },
               onChangeEnd: (_) {
                 HapticFeedback.selectionClick();
                 _persist();
-                // En dehors de la nuit, on remet la luminosité d'avant après l'aperçu.
                 if (_phase.label != 'Nuit profonde') {
                   _restoreTimer?.cancel();
-                  _restoreTimer = Timer(const Duration(milliseconds: 1500),
-                      () => _bridge.restoreBrightness());
+                  _restoreTimer = Timer(
+                    const Duration(milliseconds: 1500),
+                    () => _bridge.restoreBrightness(),
+                  );
                 }
               },
             ),
@@ -642,21 +817,42 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 }
 
-// ───────────────────────── Widgets ─────────────────────────
-class _Card extends StatelessWidget {
-  const _Card({required this.child, this.padding = const EdgeInsets.all(20)});
-  final Widget child;
-  final EdgeInsets padding;
+// ───────────────────────── Sous-widgets ─────────────────────────
+class _CircleAction extends StatelessWidget {
+  const _CircleAction({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => Material(
-        color: _C.card,
-        clipBehavior: Clip.antiAlias,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-          side: const BorderSide(color: _C.stroke),
+  Widget build(BuildContext context) => InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Column(
+            children: [
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: withA(color, 0.14),
+                ),
+                child: Icon(icon, color: color, size: 24),
+              ),
+              const SizedBox(height: 8),
+              Text(label, style: tx(12, w: FontWeight.w600, c: AppC.ink)),
+            ],
+          ),
         ),
-        child: Padding(padding: padding, child: child),
       );
 }
 
@@ -669,6 +865,7 @@ class _SlotTile extends StatelessWidget {
     required this.time,
     required this.onTap,
   });
+
   final IconData icon;
   final Color color;
   final String title, subtitle, time;
@@ -686,7 +883,9 @@ class _SlotTile extends StatelessWidget {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                    color: _a(color, 0.15), borderRadius: BorderRadius.circular(14)),
+                  color: withA(color, 0.14),
+                  borderRadius: BorderRadius.circular(14),
+                ),
                 child: Icon(icon, color: color, size: 22),
               ),
               const SizedBox(width: 14),
@@ -694,20 +893,19 @@ class _SlotTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: _t(15, w: FontWeight.w700)),
+                    Text(title, style: tx(15, w: FontWeight.w700)),
                     const SizedBox(height: 2),
-                    Text(subtitle, style: _t(12, c: _C.muted)),
+                    Text(subtitle, style: tx(12, c: AppC.muted)),
                   ],
                 ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: _C.bg,
+                  color: AppC.cardTint,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _C.stroke),
                 ),
-                child: Text(time, style: _t(15, w: FontWeight.w800, c: _C.accent)),
+                child: Text(time, style: tx(14, w: FontWeight.w800, c: AppC.indigo)),
               ),
             ],
           ),
@@ -725,11 +923,11 @@ class _PermRow extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 8),
         child: Row(
           children: [
-            const Icon(Icons.error_outline_rounded, size: 18, color: _C.dusk),
+            const Icon(Icons.error_outline_rounded, size: 18, color: AppC.dusk),
             const SizedBox(width: 10),
-            Expanded(child: Text(title, style: _t(14))),
+            Expanded(child: Text(title, style: tx(14))),
             TextButton(
-              style: TextButton.styleFrom(foregroundColor: _C.accent),
+              style: TextButton.styleFrom(foregroundColor: AppC.indigo),
               onPressed: onTap,
               child: const Text('Activer'),
             ),
@@ -739,7 +937,11 @@ class _PermRow extends StatelessWidget {
 }
 
 class _SheetOption extends StatelessWidget {
-  const _SheetOption({required this.icon, required this.label, required this.onTap});
+  const _SheetOption({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
   final IconData icon;
   final String label;
   final VoidCallback onTap;
@@ -747,14 +949,54 @@ class _SheetOption extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListTile(
         contentPadding: EdgeInsets.zero,
-        leading: Icon(icon, color: _C.accent),
-        title: Text(label, style: _t(15, w: FontWeight.w600)),
-        trailing: const Icon(Icons.chevron_right_rounded, color: _C.muted),
+        leading: Icon(icon, color: AppC.indigo),
+        title: Text(label, style: tx(15, w: FontWeight.w600)),
+        trailing: const Icon(Icons.chevron_right_rounded, color: AppC.muted),
         onTap: onTap,
       );
 }
 
-/// Frise 24 h : nuit → lever → jour → coucher → nuit, avec repère "maintenant".
+class _RhythmRingPainter extends CustomPainter {
+  _RhythmRingPainter({required this.progress, required this.color});
+  final double progress;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const strokeW = 12.0;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = math.min(size.width, size.height) / 2 - strokeW / 2;
+
+    final bgPaint = Paint()
+      ..color = AppC.cardTint
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeW
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawCircle(center, radius, bgPaint);
+
+    if (progress > 0) {
+      final fgPaint = Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeW
+        ..strokeCap = StrokeCap.round;
+
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        -math.pi / 2,
+        2 * math.pi * progress.clamp(0.0, 1.0),
+        false,
+        fgPaint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _RhythmRingPainter old) =>
+      old.progress != progress || old.color != color;
+}
+
 class _DayBarPainter extends CustomPainter {
   _DayBarPainter(this.sr, this.ss, this.nt, this.now);
   final double sr, ss, nt, now;
@@ -763,28 +1005,30 @@ class _DayBarPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     const y = 18.0;
     final bar = RRect.fromRectAndRadius(
-        Rect.fromLTWH(0, y - 8, size.width, 16), const Radius.circular(8));
+      Rect.fromLTWH(0, y - 8, size.width, 16),
+      const Radius.circular(8),
+    );
     final shader = LinearGradient(
       colors: const [
-        Color(0xFF1E1B4B),
+        Color(0xFF6B5CE7),
         Color(0xFFF59E0B),
         Color(0xFF38BDF8),
-        Color(0xFFFB923C),
-        Color(0xFF1E1B4B),
-        Color(0xFF1E1B4B),
+        Color(0xFFFB7185),
+        Color(0xFF6B5CE7),
+        Color(0xFF6B5CE7),
       ],
       stops: [0, sr, (sr + ss) / 2, ss, nt, 1],
     ).createShader(Rect.fromLTWH(0, 0, size.width, 1));
     canvas.drawRRect(bar, Paint()..shader = shader);
 
-    final tick = Paint()..color = const Color(0x66FFFFFF);
+    final tick = Paint()..color = Colors.white;
     for (final f in [sr, ss, nt]) {
-      canvas.drawCircle(Offset(f * size.width, y), 3, tick);
+      canvas.drawCircle(Offset(f * size.width, y), 3.2, tick);
     }
 
     final x = (now * size.width).clamp(9.0, size.width - 9.0);
     canvas.drawCircle(Offset(x, y), 10, Paint()..color = Colors.white);
-    canvas.drawCircle(Offset(x, y), 5, Paint()..color = _C.accent);
+    canvas.drawCircle(Offset(x, y), 5.5, Paint()..color = AppC.indigo);
   }
 
   @override
