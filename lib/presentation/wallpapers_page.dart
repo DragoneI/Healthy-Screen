@@ -186,7 +186,6 @@ class _WallpapersPageState extends State<WallpapersPage> {
     }
   }
 
-  /// Synchronise les 4 images du pack choisi vers les slots Kotlin et applique la phase courante.
   Future<void> _selectPack(_WallpaperPack pack, {bool applyNow = true}) async {
     setState(() => _busy = true);
     try {
@@ -198,29 +197,19 @@ class _WallpapersPageState extends State<WallpapersPage> {
       final duskFile = await _materialiseAsset(pack.duskAsset, '${pack.id}_dusk');
       final nightFile = await _materialiseAsset(pack.nightAsset, '${pack.id}_night');
 
-      if (dawnFile != null) {
-        await _bridge.importWallpaper('sunrise', dawnFile);
-      }
-      if (afternoonFile != null) {
-        await _bridge.importWallpaper('day', afternoonFile);
-      }
-      if (duskFile != null) {
-        await _bridge.importWallpaper('sunset', duskFile);
-      }
-      if (nightFile != null) {
-        await _bridge.importWallpaper('night', nightFile);
-      }
+      if (dawnFile != null) await _bridge.importWallpaper('sunrise', dawnFile);
+      if (afternoonFile != null) await _bridge.importWallpaper('day', afternoonFile);
+      if (duskFile != null) await _bridge.importWallpaper('sunset', duskFile);
+      if (nightFile != null) await _bridge.importWallpaper('night', nightFile);
 
       if (applyNow) {
         final moment = _currentMomentKey();
-        final momentAsset = pack.assetForMoment(moment);
-        final activeFile =
-            await _materialiseAsset(momentAsset, '${pack.id}_active');
+        final activeFile = await _materialiseAsset(
+          pack.assetForMoment(moment),
+          '${pack.id}_active',
+        );
         if (activeFile != null) {
-          await _bridge.importWallpaper(
-            _momentToNativePhase(moment),
-            activeFile,
-          );
+          await _bridge.importWallpaper(_momentToNativePhase(moment), activeFile);
         }
         await _bridge.applyPhaseNow(_momentToNativePhase(moment));
       }
@@ -231,15 +220,19 @@ class _WallpapersPageState extends State<WallpapersPage> {
       showToast(
         context,
         applyNow
-            ? 'Pack « ${pack.title} » activé et appliqué'
-            : 'Pack « ${pack.title} » sélectionné',
+            ? 'Thème « ${pack.title} » activé et appliqué'
+            : 'Thème « ${pack.title} » sélectionné',
       );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _previewMoment(_WallpaperPack pack, String moment, String label) async {
+  Future<void> _applySingleMoment(
+    _WallpaperPack pack,
+    String moment,
+    String label,
+  ) async {
     setState(() => _busy = true);
     try {
       final file = await _materialiseAsset(
@@ -253,10 +246,122 @@ class _WallpapersPageState extends State<WallpapersPage> {
       }
       if (!mounted) return;
       HapticFeedback.selectionClick();
-      showToast(context, 'Aperçu « ${pack.title} · $label » appliqué');
+      showToast(context, 'Fond « ${pack.title} · $label » appliqué');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _openImageViewer(
+    _WallpaperPack pack,
+    int initialIndex,
+    List<(String, String, String)> moments,
+  ) async {
+    int currentIdx = initialIndex;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final current = moments[currentIdx];
+          return Dialog(
+            backgroundColor: AppC.card,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(pack.title, style: tx(16, w: FontWeight.w700)),
+                            Text(current.$2, style: tx(12, c: AppC.muted)),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        icon: const Icon(Icons.close_rounded, color: AppC.muted),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(18),
+                    child: SizedBox(
+                      height: 300,
+                      width: double.infinity,
+                      child: Image.asset(
+                        current.$3,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          color: AppC.cardTint,
+                          alignment: Alignment.center,
+                          child: const Icon(
+                            Icons.broken_image_outlined,
+                            color: AppC.muted,
+                            size: 28,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      for (var i = 0; i < moments.length; i++)
+                        ChoiceChip(
+                          visualDensity: VisualDensity.compact,
+                          label: Text(
+                            moments[i].$2,
+                            style: tx(11, w: FontWeight.w600),
+                          ),
+                          selected: i == currentIdx,
+                          onSelected: (_) => setDialogState(() => currentIdx = i),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            _applySingleMoment(pack, current.$1, current.$2);
+                          },
+                          child: const Text('Appliquer ce fond'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppC.indigo,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            _selectPack(pack, applyNow: true);
+                          },
+                          child: const Text('Choisir le thème'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _pickOriginal() async {
@@ -314,20 +419,17 @@ class _WallpapersPageState extends State<WallpapersPage> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Choisissez un univers de 4 images qui évolue selon le moment de la journée.',
+                'Touchez une image pour l\'agrandir et consulter les 4 moments avant de choisir.',
                 style: tx(13, c: AppC.muted, h: 1.35),
               ),
               const SizedBox(height: 18),
-
               _originalCard(hasOriginal),
               const SizedBox(height: 22),
-
               Text(
                 'THÈMES DISPONIBLES (6 × 4 IMAGES)',
                 style: tx(11, w: FontWeight.w700, c: AppC.muted, ls: 1.1),
               ),
               const SizedBox(height: 12),
-
               for (final pack in _packs) ...[
                 _packCard(pack, isSelected: pack.id == activePack.id),
                 const SizedBox(height: 14),
@@ -501,14 +603,12 @@ class _WallpapersPageState extends State<WallpapersPage> {
             ],
           ),
           const SizedBox(height: 14),
-
-          // Aperçu des 4 moments de la journée (touchez un aperçu pour l'essayer)
           Row(
             children: [
               for (var i = 0; i < moments.length; i++) ...[
                 Expanded(
                   child: GestureDetector(
-                    onTap: () => _previewMoment(pack, moments[i].$1, moments[i].$2),
+                    onTap: () => _openImageViewer(pack, i, moments),
                     child: Column(
                       children: [
                         ClipRRect(
@@ -520,8 +620,9 @@ class _WallpapersPageState extends State<WallpapersPage> {
                               fit: BoxFit.cover,
                               errorBuilder: (_, __, ___) => Container(
                                 color: AppC.cardTint,
+                                alignment: Alignment.center,
                                 child: const Icon(
-                                  Icons.image_not_supported_outlined,
+                                  Icons.broken_image_outlined,
                                   color: AppC.muted,
                                   size: 18,
                                 ),
@@ -544,7 +645,6 @@ class _WallpapersPageState extends State<WallpapersPage> {
               ],
             ],
           ),
-
           const SizedBox(height: 14),
           SizedBox(
             width: double.infinity,
@@ -560,7 +660,7 @@ class _WallpapersPageState extends State<WallpapersPage> {
                     ),
                     onPressed: () => _selectPack(pack, applyNow: true),
                     icon: const Icon(Icons.refresh_rounded, size: 18),
-                    label: const Text('Réappliquer ce pack maintenant'),
+                    label: const Text('Réappliquer ce thème'),
                   )
                 : FilledButton(
                     style: FilledButton.styleFrom(
@@ -572,7 +672,7 @@ class _WallpapersPageState extends State<WallpapersPage> {
                       ),
                     ),
                     onPressed: () => _selectPack(pack, applyNow: true),
-                    child: const Text('Utiliser ce pack'),
+                    child: const Text('Choisir ce thème'),
                   ),
           ),
         ],

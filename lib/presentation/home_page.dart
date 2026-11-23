@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -352,7 +353,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       children: [
         _buildTopHeroHeader(),
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
           child: Column(
             children: [
               _buildSmartTipCard(),
@@ -395,10 +396,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 8),
           child: Column(
             children: [
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: Column(
@@ -406,13 +408,32 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       children: [
                         Text(_greeting, style: tx(13, c: AppC.muted)),
                         const SizedBox(height: 2),
-                        Text(
-                          'Healthy Screen',
-                          style: tx(26, w: FontWeight.w800, ls: -0.5),
+                        ClipRect(
+                          child: SizedBox(
+                            height: 46,
+                            width: 220,
+                            child: Transform.translate(
+                              offset: const Offset(0, -62),
+                              child: SizedBox(
+                                height: 170,
+                                width: 220,
+                                child: SvgPicture.asset(
+                                  'assets/icons/healthy_screen_logo.svg',
+                                  fit: BoxFit.contain,
+                                  alignment: Alignment.centerLeft,
+                                  placeholderBuilder: (_) => Text(
+                                    'Healthy Screen',
+                                    style: tx(26, w: FontWeight.w800, ls: -0.5),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                       ],
                     ),
                   ),
+                  const SizedBox(width: 8),
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
@@ -445,7 +466,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   ),
                 ],
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 14),
 
               // Jauge circulaire centrale inspirée d'Envol
               SizedBox(
@@ -493,7 +514,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 textAlign: TextAlign.center,
                 style: tx(12, c: AppC.muted),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
                 child: _paused
