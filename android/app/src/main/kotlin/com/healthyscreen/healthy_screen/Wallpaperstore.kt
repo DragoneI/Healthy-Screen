@@ -7,6 +7,9 @@ import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.ceil
 import kotlin.math.max
+import android.app.WallpaperManager
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
 
 /**
  * Stocke les fonds choisis par l'utilisateur dans filesDir/wallpapers/<slot>_<timestamp>.jpg
@@ -20,6 +23,40 @@ object WallpaperStore {
 
     fun remove(ctx: Context, slot: String) {
         dir(ctx).listFiles()?.filter { it.name.startsWith("${slot}_") }?.forEach { it.delete() }
+    }
+
+    /** Capture le fond d'écran actuel de l'appareil dans le slot "original" s'il n'existe pas déjà. */
+    fun captureCurrentWallpaperIfMissing(ctx: Context): String? {
+        get(ctx, "original")?.let { return it.absolutePath }
+        return captureCurrentWallpaper(ctx)
+    }
+
+    /** Force la capture du fond d'écran actuel dans le slot "original". */
+    fun captureCurrentWallpaper(ctx: Context): String? {
+        return try {
+            val wm = WallpaperManager.getInstance(ctx)
+            val drawable = wm.drawable ?: return null
+            val rawBitmap: Bitmap? = if (drawable is BitmapDrawable && drawable.bitmap != null) {
+                drawable.bitmap
+            } else {
+                val w = drawable.intrinsicWidth.takeIf { it > 0 } ?: ctx.resources.displayMetrics.widthPixels
+                val h = drawable.intrinsicHeight.takeIf { it > 0 } ?: ctx.resources.displayMetrics.heightPixels
+                val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(bmp)
+                drawable.setBounds(0, 0, canvas.width, canvas.height)
+                drawable.draw(canvas)
+                bmp
+            }
+            val src = rawBitmap ?: return null
+            val dm = ctx.resources.displayMetrics
+            val cover = coverCrop(src, dm.widthPixels, dm.heightPixels)
+            remove(ctx, "original")
+            val out = File(dir(ctx), "original_${System.currentTimeMillis()}.jpg")
+            FileOutputStream(out).use { cover.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+            out.absolutePath
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /** Copie l'image choisie, la recadre à la taille de l'écran et retourne son chemin. */

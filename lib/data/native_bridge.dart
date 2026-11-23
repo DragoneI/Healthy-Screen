@@ -54,6 +54,10 @@ class NativeBridge {
     };
   }
 
+  Future<String?> captureOriginalWallpaper() async {
+    return _channel.invokeMethod<String>('captureOriginalWallpaper');
+  }
+
   /// Copie et redimensionne l'image choisie ; retourne le nouveau chemin (ou null si échec).
   Future<String?> importWallpaper(String slot, String path) async {
     return _channel.invokeMethod<String>('importWallpaper', {'slot': slot, 'path': path});
@@ -99,6 +103,17 @@ class NativeBridge {
   Future<void> cancelFocus() async {
     await _channel.invokeMethod('cancelFocus');
   }
+
+  Future<bool> isIgnoringBatteryOptimizations() async {
+  final result =
+      await _channel.invokeMethod<bool>('isIgnoringBatteryOptimizations');
+  return result ?? false;
+  }
+
+  Future<void> openBatteryOptimizationSettings() async {
+  await _channel.invokeMethod('openBatteryOptimizationSettings');
+  }
+
 }
 
 class ScreenTimeData {

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'presentation/app_shell.dart';
+import 'presentation/splash_video_page.dart';
 import 'presentation/ui.dart';
 
 void main() {
@@ -34,7 +34,7 @@ class HealthyScreenApp extends StatelessWidget {
           surface: AppC.card,
         ),
       ),
-      home: const AppShell(),
+      home: const SplashVideoPage(),
     );
   }
 }

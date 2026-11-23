@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -132,6 +133,9 @@ class _SpacePageState extends State<SpacePage> with WidgetsBindingObserver {
   List<({String name, int minutes})> _top = [];
   int _goal = 240;
 
+  Map<String, int> _appLimits = {};
+  final Set<String> _remindedApps = {};
+
   int _focusEnd = 0;
   String _focusLabel = '';
   int _focusTotalMin = 0;
@@ -170,6 +174,133 @@ class _SpacePageState extends State<SpacePage> with WidgetsBindingObserver {
     if (_focusActive || _tick % 30 == 0) setState(() {});
   }
 
+  Map<String, int> _decodeLimits(String? raw) {
+    if (raw == null || raw.isEmpty) return {};
+    try {
+      final decoded = jsonDecode(raw) as Map<String, dynamic>;
+      return decoded.map((k, v) => MapEntry(k, (v as num).toInt()));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> _setAppLimit(String appName, int minutes) async {
+    final updated = Map<String, int>.from(_appLimits);
+    if (minutes <= 0) {
+      updated.remove(appName);
+      _remindedApps.remove(appName);
+    } else {
+      updated[appName] = minutes.clamp(15, 480);
+      _remindedApps.remove(appName);
+    }
+    setState(() => _appLimits = updated);
+    await _prefs?.setString('app_limits_min', jsonEncode(updated));
+    _checkGentleReminders();
+  }
+
+  void _checkGentleReminders() {
+    for (final app in _top) {
+      final limit = _appLimits[app.name];
+      if (limit != null && app.minutes >= limit && !_remindedApps.contains(app.name)) {
+        _remindedApps.add(app.name);
+        if (mounted) {
+          showToast(
+            context,
+            'Rappel doux : ${fmtMinutes(app.minutes)} sur ${app.name} (limite ${fmtMinutes(limit)}).',
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _editAppLimit(String appName) async {
+    int selected = _appLimits[appName] ?? 30;
+    final result = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: AppC.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Limite quotidienne · $appName', style: tx(18, w: FontWeight.w700)),
+                const SizedBox(height: 6),
+                Text(
+                  'Recevez un rappel bienveillant quand vous atteignez cette durée.',
+                  style: tx(12, c: AppC.muted),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      onPressed: () => setModalState(
+                        () => selected = (selected - 15).clamp(15, 480),
+                      ),
+                      icon: const Icon(
+                        Icons.remove_circle_outline,
+                        color: AppC.indigo,
+                        size: 30,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Text(fmtMinutes(selected), style: tx(24, w: FontWeight.w800)),
+                    ),
+                    IconButton(
+                      onPressed: () => setModalState(
+                        () => selected = (selected + 15).clamp(15, 480),
+                      ),
+                      icon: const Icon(
+                        Icons.add_circle_outline,
+                        color: AppC.indigo,
+                        size: 30,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    if (_appLimits.containsKey(appName))
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, 0),
+                        child: Text(
+                          'Retirer',
+                          style: tx(13, w: FontWeight.w600, c: AppC.dusk),
+                        ),
+                      ),
+                    const Spacer(),
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppC.indigo,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      onPressed: () => Navigator.pop(ctx, selected),
+                      child: const Text('Enregistrer'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (result != null) {
+      await _setAppLimit(appName, result);
+    }
+  }
+
   Future<void> _load() async {
     final p = await SharedPreferences.getInstance();
     await p.reload();
@@ -185,10 +316,12 @@ class _SpacePageState extends State<SpacePage> with WidgetsBindingObserver {
         _top = data.top;
       }
       _goal = p.getInt('screen_goal_min') ?? 240;
+      _appLimits = _decodeLimits(p.getString('app_limits_min'));
       _focusEnd = p.getInt('focus_end') ?? 0;
       _focusLabel = p.getString('focus_label') ?? '';
       _focusTotalMin = p.getInt('focus_total_min') ?? 0;
     });
+    _checkGentleReminders();
   }
 
   Future<void> _startFocus((String, String, int, int, IconData, Color) m) async {
@@ -350,7 +483,6 @@ class _SpacePageState extends State<SpacePage> with WidgetsBindingObserver {
           ),
           const SizedBox(height: 18),
 
-          // Anneau segmenté multicolore inspiré de Digital Wellbeing
           SizedBox(
             width: 196,
             height: 196,
@@ -437,7 +569,6 @@ class _SpacePageState extends State<SpacePage> with WidgetsBindingObserver {
           ),
           const SizedBox(height: 10),
 
-          // Graphique hebdomadaire à barres style Digital Wellbeing
           SizedBox(
             height: 104,
             child: Row(
@@ -484,50 +615,92 @@ class _SpacePageState extends State<SpacePage> with WidgetsBindingObserver {
               ),
             ),
             const SizedBox(height: 12),
-            for (var i = 0; i < _top.length; i++)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+            for (var i = 0; i < _top.length; i++) ...[
+              Builder(
+                builder: (context) {
+                  final app = _top[i];
+                  final limit = _appLimits[app.name];
+                  final exceeded = limit != null && app.minutes >= limit;
+                  final barColor = exceeded
+                      ? AppC.dusk
+                      : _ringColors[i % _ringColors.length];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          width: 10,
-                          height: 10,
-                          decoration: BoxDecoration(
-                            color: _ringColors[i % _ringColors.length],
-                            shape: BoxShape.circle,
-                          ),
+                        Row(
+                          children: [
+                            Container(
+                              width: 10,
+                              height: 10,
+                              decoration: BoxDecoration(
+                                color: barColor,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                app.name,
+                                style: tx(14, w: FontWeight.w600),
+                              ),
+                            ),
+                            Text(
+                              fmtMinutes(app.minutes),
+                              style: tx(
+                                13,
+                                w: FontWeight.w600,
+                                c: exceeded ? AppC.dusk : AppC.muted,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            InkWell(
+                              borderRadius: BorderRadius.circular(10),
+                              onTap: () => _editAppLimit(app.name),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: exceeded
+                                      ? withA(AppC.dusk, 0.14)
+                                      : AppC.cardTint,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  limit != null
+                                      ? 'Lim. ${fmtMinutes(limit)}'
+                                      : 'Limite',
+                                  style: tx(
+                                    11,
+                                    w: FontWeight.w700,
+                                    c: exceeded
+                                        ? AppC.dusk
+                                        : (limit != null ? AppC.indigo : AppC.muted),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _top[i].name,
-                            style: tx(14, w: FontWeight.w600),
+                        const SizedBox(height: 6),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: LinearProgressIndicator(
+                            value: (app.minutes / _top.first.minutes).clamp(0.0, 1.0),
+                            minHeight: 6,
+                            backgroundColor: AppC.cardTint,
+                            valueColor: AlwaysStoppedAnimation(barColor),
                           ),
-                        ),
-                        Text(
-                          fmtMinutes(_top[i].minutes),
-                          style: tx(13, w: FontWeight.w600, c: AppC.muted),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 6),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: LinearProgressIndicator(
-                        value: (_top[i].minutes / _top.first.minutes).clamp(0.0, 1.0),
-                        minHeight: 6,
-                        backgroundColor: AppC.cardTint,
-                        valueColor: AlwaysStoppedAnimation(
-                          _ringColors[i % _ringColors.length],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                  );
+                },
               ),
+            ],
           ],
         ],
       ),

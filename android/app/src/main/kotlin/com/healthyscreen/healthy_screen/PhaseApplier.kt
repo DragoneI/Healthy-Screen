@@ -13,18 +13,12 @@ object PhaseApplier {
     private const val KEY_PREV_LEVEL = "prev_brightness_level"
 
     fun apply(ctx: Context, phase: String) {
-        val resId = when (phase) {
-            "sunrise" -> R.drawable.wp_sunrise
-            "sunset" -> R.drawable.wp_sunset
-            else -> R.drawable.wp_night
-        }
-
-        setWallpaper(ctx, phase, resId)
+        setWallpaper(ctx, phase)
 
         if (phase == "night") {
             // Utilise la valeur choisie avec le curseur (plus de 50 en dur)
             dimBrightness(ctx, AutomationState.nightBrightness(ctx))
-        } else if (phase == "sunrise") {
+        } else if (phase == "sunrise" || phase == "day") {
             restoreBrightness(ctx)
         }
     }
@@ -33,7 +27,7 @@ object PhaseApplier {
     fun applyCurrent(ctx: Context) = apply(ctx, AutomationState.currentPhase(ctx))
 
     /**
-     * Pause : retire le fond d'écran de l'app (retour au fond par défaut du téléphone)
+     * Pause : remet le fond d'écran habituel (ou efface les fonds appliqués)
      * et remet la luminosité d'avant.
      */
     fun release(ctx: Context) {
@@ -41,7 +35,7 @@ object PhaseApplier {
             val original = WallpaperStore.get(ctx, "original")
                 ?.let { BitmapFactory.decodeFile(it.absolutePath) }
             if (original != null) {
-                // Le fond habituel choisi par l'utilisateur
+                // Le fond habituel choisi ou capturé par l'utilisateur
                 setBitmapEverywhere(ctx, original)
             } else {
                 // Aucun fond habituel enregistré : retour au fond par défaut d'Android
@@ -61,16 +55,14 @@ object PhaseApplier {
     /** Aperçu en direct depuis le curseur de l'app. */
     fun previewBrightness(ctx: Context, level: Int) = dimBrightness(ctx, level)
 
-    private fun setWallpaper(ctx: Context, phase: String, resId: Int) {
+    private fun setWallpaper(ctx: Context, phase: String) {
         try {
             val m = ctx.resources.displayMetrics
-            // Fond choisi par l'utilisateur, sinon fond par défaut de l'app
-            val custom = WallpaperStore.get(ctx, phase)
-            val bmp = (if (custom != null) BitmapFactory.decodeFile(custom.absolutePath) else null)
-                ?: BitmapFactory.decodeResource(ctx.resources, resId)
-            if (bmp != null) {
-                setBitmapEverywhere(ctx, WallpaperStore.coverCrop(bmp, m.widthPixels, m.heightPixels))
-            }
+            val file = WallpaperStore.get(ctx, phase)
+                ?: (if (phase == "day") WallpaperStore.get(ctx, "sunrise") else null)
+                ?: return
+            val bmp = BitmapFactory.decodeFile(file.absolutePath) ?: return
+            setBitmapEverywhere(ctx, WallpaperStore.coverCrop(bmp, m.widthPixels, m.heightPixels))
         } catch (e: Exception) {
             e.printStackTrace()
         }

@@ -44,6 +44,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _write = false;
   bool _exact = false;
   bool _notif = false;
+  bool _batteryOk = true;
 
   bool get _paused =>
       _pauseUntil == -1 || _pauseUntil > _now.millisecondsSinceEpoch;
@@ -79,6 +80,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final write = await _bridge.canWriteSettings();
     final exact = await _bridge.canScheduleExact();
     final notif = await Permission.notification.isGranted;
+    final batteryOk = await _bridge.isIgnoringBatteryOptimizations();
     if (!mounted) return;
     setState(() {
       _prefs = p;
@@ -100,6 +102,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _write = write;
       _exact = exact;
       _notif = notif;
+      _batteryOk = batteryOk;
     });
   }
 
@@ -342,7 +345,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   // ───────────── UI ─────────────
   @override
   Widget build(BuildContext context) {
-    final missing = [!_write, !_exact, !_notif].where((e) => e).length;
+    final missing =
+        [!_write, !_exact, !_notif, !_batteryOk].where((e) => e).length;
     return ListView(
       padding: EdgeInsets.zero,
       children: [
@@ -376,9 +380,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final accent = _paused ? AppC.muted : phase.color;
     final next = _next;
     final remaining = next.$2.difference(_now);
-    final scoreValue = _paused
-        ? 'PAUSE'
-        : '${(phase.progress * 100).round()}%';
+    final scoreValue =
+        _paused ? 'PAUSE' : '${(phase.progress * 100).round()}%';
 
     return Container(
       decoration: BoxDecoration(
@@ -411,7 +414,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     ),
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                     decoration: BoxDecoration(
                       color: AppC.card,
                       borderRadius: BorderRadius.circular(20),
@@ -471,7 +475,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          _paused ? _pauseLabel : 'dans ${_fmtDuration(remaining)}',
+                          _paused
+                              ? _pauseLabel
+                              : 'dans ${_fmtDuration(remaining)}',
                           style: tx(11, w: FontWeight.w600, c: accent),
                         ),
                       ],
@@ -586,7 +592,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             alignment: Alignment.centerRight,
             child: already
                 ? Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
                       color: withA(Colors.white, 0.16),
                       borderRadius: BorderRadius.circular(14),
@@ -594,7 +601,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.check_circle, color: Colors.white, size: 15),
+                        const Icon(Icons.check_circle,
+                            color: Colors.white, size: 15),
                         const SizedBox(width: 6),
                         Text(
                           'Nuit réglée à ${hhmm(target.hour, target.minute)}',
@@ -607,7 +615,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     style: TextButton.styleFrom(
                       backgroundColor: withA(Colors.white, 0.18),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
                       ),
@@ -675,7 +684,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           childrenPadding: EdgeInsets.zero,
           iconColor: AppC.muted,
           collapsedIconColor: AppC.muted,
-          title: Text('Configuration requise ($missing)', style: tx(15, w: FontWeight.w700)),
+          title: Text('Configuration requise ($missing)',
+              style: tx(15, w: FontWeight.w700)),
           subtitle: Text(
             'Indispensable pour que tout fonctionne en arrière-plan',
             style: tx(12, c: AppC.muted),
@@ -695,6 +705,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               _PermRow(
                 title: 'Notifications',
                 onTap: _askNotifications,
+              ),
+            if (!_batteryOk)
+              _PermRow(
+                title: 'Batterie sans restriction',
+                onTap: () => _bridge.openBatteryOptimizationSettings(),
               ),
           ],
         ),
@@ -775,7 +790,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           Row(
             children: [
               Expanded(
-                child: Text('Luminosité de nuit', style: tx(15, w: FontWeight.w700)),
+                child: Text('Luminosité de nuit',
+                    style: tx(15, w: FontWeight.w700)),
               ),
               Text('$pct %', style: tx(15, w: FontWeight.w800, c: AppC.indigo)),
             ],
@@ -900,12 +916,14 @@ class _SlotTile extends StatelessWidget {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color: AppC.cardTint,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Text(time, style: tx(14, w: FontWeight.w800, c: AppC.indigo)),
+                child:
+                    Text(time, style: tx(14, w: FontWeight.w800, c: AppC.indigo)),
               ),
             ],
           ),

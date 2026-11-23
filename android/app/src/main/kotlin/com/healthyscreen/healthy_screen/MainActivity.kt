@@ -3,13 +3,15 @@ package com.healthyscreen.healthy_screen
 import android.app.AlarmManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity: FlutterActivity() {
+class MainActivity : FlutterActivity() {
     private val CHANNEL = "circadian/native"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -40,6 +42,27 @@ class MainActivity: FlutterActivity() {
                     }
                     result.success(null)
                 }
+                "isIgnoringBatteryOptimizations" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                        result.success(pm.isIgnoringBatteryOptimizations(packageName))
+                    } else {
+                        result.success(true)
+                    }
+                }
+                "openBatteryOptimizationSettings" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        try {
+                            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                data = Uri.parse("package:$packageName")
+                            }
+                            startActivity(intent)
+                        } catch (_: Exception) {
+                            startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                        }
+                    }
+                    result.success(null)
+                }
                 "saveSchedule" -> {
                     val args = call.arguments as? Map<*, *>
                     if (args != null) {
@@ -47,7 +70,6 @@ class MainActivity: FlutterActivity() {
                         val map = args as Map<String, Any>
                         ScheduleStore.saveConfig(context, map)
 
-                        // Programmer les 3 alarmes
                         val sHour = map["sunriseHour"] as? Int ?: 7
                         val sMin = map["sunriseMinute"] as? Int ?: 0
                         AlarmScheduler.schedule(context, "sunrise", sHour, sMin)
@@ -62,25 +84,36 @@ class MainActivity: FlutterActivity() {
                     }
                     result.success(null)
                 }
-
-                // ── Nouveau : aperçu en direct de la luminosité (curseur) ──
                 "previewBrightness" -> {
                     val level = call.argument<Number>("level")?.toInt() ?: 50
                     PhaseApplier.previewBrightness(applicationContext, level)
                     result.success(null)
                 }
-                // ── Nouveau : remet la luminosité d'avant l'aperçu ──
                 "restoreBrightness" -> {
                     PhaseApplier.restoreBrightness(applicationContext)
                     result.success(null)
                 }
-                // ── Nouveau : pause réelle (0 = reprise, -1 = manuelle, >0 = jusqu'à ce timestamp) ──
                 "setPaused" -> {
                     val until = call.argument<Number>("untilMs")?.toLong() ?: 0L
                     Thread { PauseController.setPaused(applicationContext, until) }.start()
                     result.success(null)
                 }
-                // ── Fonds d'écran personnalisés ──
+
+                "captureOriginalWallpaper" -> {
+                    Thread {
+                        val out = WallpaperStore.captureCurrentWallpaper(applicationContext)
+                        runOnUiThread { result.success(out) }
+                    }.start()
+                }
+                "applyPhaseNow" -> {
+                    val phase = call.argument<String>("phase") ?: "night"
+                    Thread {
+                        WallpaperStore.captureCurrentWallpaperIfMissing(applicationContext)
+                        PhaseApplier.apply(applicationContext, phase)
+                    }.start()
+                    result.success(null)
+                }
+
                 "getWallpapers" -> {
                     val slots = listOf("original", "sunrise", "sunset", "night")
                     result.success(slots.associateWith { WallpaperStore.get(applicationContext, it)?.absolutePath })
@@ -110,8 +143,6 @@ class MainActivity: FlutterActivity() {
                     Thread { PhaseApplier.apply(applicationContext, phase) }.start()
                     result.success(null)
                 }
-
-                // ── Temps d'écran ──
                 "hasUsageAccess" -> {
                     result.success(UsageHelper.hasAccess(applicationContext))
                 }
@@ -129,8 +160,6 @@ class MainActivity: FlutterActivity() {
                         runOnUiThread { result.success(data) }
                     }.start()
                 }
-
-                // ── Sessions focus ──
                 "startFocus" -> {
                     val minutes = call.argument<Number>("minutes")?.toInt() ?: 25
                     val breakMin = call.argument<Number>("breakMinutes")?.toInt() ?: 0
