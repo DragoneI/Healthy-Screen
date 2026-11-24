@@ -353,7 +353,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       children: [
         _buildTopHeroHeader(),
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
           child: Column(
             children: [
               _buildSmartTipCard(),
@@ -376,13 +376,27 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildTopHeroHeader() {
+ Widget _buildTopHeroHeader() {
     final phase = _phase;
     final accent = _paused ? AppC.muted : phase.color;
     final next = _next;
     final remaining = next.$2.difference(_now);
     final scoreValue =
         _paused ? 'PAUSE' : '${(phase.progress * 100).round()}%';
+
+    final nowMin = _now.hour * 60 + _now.minute;
+    final isNight = nowMin >= _min(_night) || nowMin < _min(_sunrise);
+    final isEvening = nowMin >= _min(_sunset) || _now.hour >= 18;
+
+    final topRightGreeting = isEvening
+        ? 'Bonsoir'
+        : (_now.hour < 12 ? 'Bonjour' : 'Bon après-midi');
+    final topRightIcon = isNight
+        ? Icons.bedtime_rounded
+        : (isEvening ? Icons.wb_twilight_rounded : Icons.wb_sunny_rounded);
+    final topRightColor = isNight
+        ? AppC.night
+        : (isEvening ? AppC.dusk : AppC.sun);
 
     return Container(
       decoration: BoxDecoration(
@@ -396,47 +410,38 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 8),
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
           child: Column(
             children: [
               Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(_greeting, style: tx(13, c: AppC.muted)),
-                        const SizedBox(height: 2),
-                        ClipRect(
-                          child: SizedBox(
-                            height: 46,
-                            width: 220,
-                            child: Transform.translate(
-                              offset: const Offset(0, -62),
-                              child: SizedBox(
-                                height: 170,
-                                width: 220,
-                                child: SvgPicture.asset(
-                                  'assets/icons/healthy_screen_logo.svg',
-                                  fit: BoxFit.contain,
-                                  alignment: Alignment.centerLeft,
-                                  placeholderBuilder: (_) => Text(
-                                    'Healthy Screen',
-                                    style: tx(26, w: FontWeight.w800, ls: -0.5),
-                                  ),
-                                ),
-                              ),
-                            ),
+                    child: Transform.translate(
+                      offset: const Offset(-19, 0), // ← Change -4 en -8 ou -10 (plus le chiffre négatif est grand, plus il va à gauche)
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: SvgPicture.asset(
+                         'assets/icons/healthy_screen_logo.svg',
+                          height: 28,
+                          fit: BoxFit.contain,
+                          alignment: Alignment.centerLeft,
+                          colorFilter: const ColorFilter.mode(
+                         AppC.indigo, // ← Remplace par la couleur souhaitée (ex: AppC.indigo, Color(0xFF7B5CFA), Colors.white...)
+                          BlendMode.srcIn,
+                          ),
+                          placeholderBuilder: (_) => Text(
+                            'Healthy Screen',
+                            style: tx(24, w: FontWeight.w800, ls: -0.5),
                           ),
                         ),
-                      ],
+                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
                   Container(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                     decoration: BoxDecoration(
                       color: AppC.card,
                       borderRadius: BorderRadius.circular(20),
@@ -452,23 +457,23 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          _paused ? Icons.pause_circle_filled : phase.icon,
-                          size: 16,
-                          color: accent,
+                          topRightIcon,
+                          size: 18,
+                          color: topRightColor,
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          _paused ? 'En pause' : phase.label,
-                          style: tx(12, w: FontWeight.w700, c: AppC.ink),
+                          topRightGreeting,
+                          style: tx(15, w: FontWeight.w700, c: AppC.ink),
                         ),
                       ],
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 22),
 
-              // Jauge circulaire centrale inspirée d'Envol
+              // Jauge circulaire centrale
               SizedBox(
                 width: 158,
                 height: 158,
@@ -514,7 +519,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 textAlign: TextAlign.center,
                 style: tx(12, c: AppC.muted),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
                 child: _paused
