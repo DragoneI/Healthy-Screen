@@ -16,9 +16,8 @@ object PhaseApplier {
         setWallpaper(ctx, phase)
 
         if (phase == "night") {
-            // Utilise la valeur choisie avec le curseur (plus de 50 en dur)
             dimBrightness(ctx, AutomationState.nightBrightness(ctx))
-        } else if (phase == "sunrise" || phase == "day") {
+        } else if (phase == "sunrise" || phase == "afternoon" || phase == "day") {
             restoreBrightness(ctx)
         }
     }
@@ -35,10 +34,8 @@ object PhaseApplier {
             val original = WallpaperStore.get(ctx, "original")
                 ?.let { BitmapFactory.decodeFile(it.absolutePath) }
             if (original != null) {
-                // Le fond habituel choisi ou capturé par l'utilisateur
                 setBitmapEverywhere(ctx, original)
             } else {
-                // Aucun fond habituel enregistré : retour au fond par défaut d'Android
                 val wm = WallpaperManager.getInstance(ctx)
                 if (Build.VERSION.SDK_INT >= 24) {
                     wm.clear(WallpaperManager.FLAG_SYSTEM or WallpaperManager.FLAG_LOCK)
@@ -59,7 +56,10 @@ object PhaseApplier {
         try {
             val m = ctx.resources.displayMetrics
             val file = WallpaperStore.get(ctx, phase)
-                ?: (if (phase == "day") WallpaperStore.get(ctx, "sunrise") else null)
+                ?: when (phase) {
+                    "afternoon", "day" -> WallpaperStore.get(ctx, "sunrise")
+                    else -> null
+                }
                 ?: return
             val bmp = BitmapFactory.decodeFile(file.absolutePath) ?: return
             setBitmapEverywhere(ctx, WallpaperStore.coverCrop(bmp, m.widthPixels, m.heightPixels))

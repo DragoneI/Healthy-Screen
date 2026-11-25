@@ -8,13 +8,15 @@ object ScheduleStore {
     fun saveConfig(ctx: Context, map: Map<String, Any>) {
         val prefs = ctx.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().apply {
-            map["sunriseHour"]?.let { putInt("sunriseHour", it as Int) }
-            map["sunriseMinute"]?.let { putInt("sunriseMinute", it as Int) }
-            map["sunsetHour"]?.let { putInt("sunsetHour", it as Int) }
-            map["sunsetMinute"]?.let { putInt("sunsetMinute", it as Int) }
-            map["nightHour"]?.let { putInt("nightHour", it as Int) }
-            map["nightMinute"]?.let { putInt("nightMinute", it as Int) }
-            map["nightBrightness"]?.let { putInt("nightBrightness", it as Int) }
+            (map["sunriseHour"] as? Number)?.let { putInt("sunriseHour", it.toInt()) }
+            (map["sunriseMinute"] as? Number)?.let { putInt("sunriseMinute", it.toInt()) }
+            (map["afternoonHour"] as? Number)?.let { putInt("afternoonHour", it.toInt()) }
+            (map["afternoonMinute"] as? Number)?.let { putInt("afternoonMinute", it.toInt()) }
+            (map["sunsetHour"] as? Number)?.let { putInt("sunsetHour", it.toInt()) }
+            (map["sunsetMinute"] as? Number)?.let { putInt("sunsetMinute", it.toInt()) }
+            (map["nightHour"] as? Number)?.let { putInt("nightHour", it.toInt()) }
+            (map["nightMinute"] as? Number)?.let { putInt("nightMinute", it.toInt()) }
+            (map["nightBrightness"] as? Number)?.let { putInt("nightBrightness", it.toInt()) }
             apply()
         }
     }

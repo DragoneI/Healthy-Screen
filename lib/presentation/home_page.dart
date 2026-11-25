@@ -6,6 +6,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/native_bridge.dart';
 import '../domain/schedule_config.dart';
@@ -35,6 +43,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   DateTime _now = DateTime.now();
 
   TimeOfDay _sunrise = const TimeOfDay(hour: 7, minute: 0);
+  TimeOfDay _afternoon = const TimeOfDay(hour: 13, minute: 0);
   TimeOfDay _sunset = const TimeOfDay(hour: 19, minute: 0);
   TimeOfDay _night = const TimeOfDay(hour: 22, minute: 0);
   double _brightness = 50;
@@ -90,6 +99,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         hour: p.getInt('sunrise_hour') ?? 7,
         minute: p.getInt('sunrise_minute') ?? 0,
       );
+      _afternoon = TimeOfDay(
+        hour: p.getInt('afternoon_hour') ?? 14,
+        minute: p.getInt('afternoon_minute') ?? 0,
+      );
       _sunset = TimeOfDay(
         hour: p.getInt('sunset_hour') ?? 19,
         minute: p.getInt('sunset_minute') ?? 0,
@@ -112,6 +125,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (p == null) return;
     await p.setInt('sunrise_hour', _sunrise.hour);
     await p.setInt('sunrise_minute', _sunrise.minute);
+    await p.setInt('afternoon_hour', _afternoon.hour);
+    await p.setInt('afternoon_minute', _afternoon.minute);
     await p.setInt('sunset_hour', _sunset.hour);
     await p.setInt('sunset_minute', _sunset.minute);
     await p.setInt('night_hour', _night.hour);
@@ -168,6 +183,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _pickTime(String which) async {
     final current = switch (which) {
       'sunrise' => _sunrise,
+      'afternoon' => _afternoon,
       'sunset' => _sunset,
       _ => _night,
     };
@@ -187,14 +203,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (picked == null || !mounted) return;
 
     final sr = which == 'sunrise' ? picked : _sunrise;
+    final af = which == 'afternoon' ? picked : _afternoon;
     final ss = which == 'sunset' ? picked : _sunset;
     final nt = which == 'night' ? picked : _night;
-    if (!(_min(sr) < _min(ss) && _min(ss) < _min(nt))) {
-      showToast(context, 'Ordre attendu : lever → coucher → nuit');
+    if (!(_min(sr) < _min(af) && _min(af) < _min(ss) && _min(ss) < _min(nt))) {
+      showToast(context, 'Ordre attendu : matin → après-midi → crépuscule → nuit');
       return;
     }
     setState(() {
       _sunrise = sr;
+      _afternoon = af;
       _sunset = ss;
       _night = nt;
     });
@@ -279,6 +297,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   _Phase get _phase {
     final n = _now.hour * 60 + _now.minute;
     final sr = _min(_sunrise);
+    final af = _min(_afternoon);
     final ss = _min(_sunset);
     final nt = _min(_night);
 
@@ -286,7 +305,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final nightSpan = ((1440 - nt) + sr).clamp(1, 1440);
       final elapsed = n >= nt ? (n - nt) : ((1440 - nt) + n);
       return _Phase(
-        'Nuit profonde',
+        'Nuit',
         'Écran apaisé pour préparer le sommeil',
         Icons.bedtime_rounded,
         AppC.night,
@@ -296,16 +315,26 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (n >= ss) {
       final span = (nt - ss).clamp(1, 1440);
       return _Phase(
-        'Soirée douce',
-        'Transition en douceur vers la nuit',
+        'Crépuscule',
+        'Transition douce vers la nuit',
         Icons.wb_twilight_rounded,
         AppC.dusk,
         ((n - ss) / span).clamp(0.08, 1.0),
       );
     }
-    final span = (ss - sr).clamp(1, 1440);
+    if (n >= af) {
+      final span = (ss - af).clamp(1, 1440);
+      return _Phase(
+        'Après-midi',
+        'Lumière équilibrée de l\'après-midi',
+        Icons.light_mode_rounded,
+        const Color(0xFF38BDF8),
+        ((n - af) / span).clamp(0.08, 1.0),
+      );
+    }
+    final span = (af - sr).clamp(1, 1440);
     return _Phase(
-      'Journée lumineuse',
+      'Matin',
       'Écran à pleine énergie',
       Icons.wb_sunny_rounded,
       AppC.sun,
@@ -315,9 +344,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   (String, DateTime) get _next {
     final list = <(String, DateTime)>[
-      ('Lever du soleil', _nextOccurrence(_sunrise)),
-      ('Coucher du soleil', _nextOccurrence(_sunset)),
-      ('Nuit profonde', _nextOccurrence(_night)),
+      ('Matin', _nextOccurrence(_sunrise)),
+      ('Après-midi', _nextOccurrence(_afternoon)),
+      ('Crépuscule', _nextOccurrence(_sunset)),
+      ('Nuit', _nextOccurrence(_night)),
     ]..sort((a, b) => a.$2.compareTo(b.$2));
     return list.first;
   }
@@ -334,13 +364,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final d = DateTime.fromMillisecondsSinceEpoch(_pauseUntil);
     final tomorrow = d.day != _now.day;
     return 'Jusqu\'à ${tomorrow ? 'demain ' : ''}${hhmm(d.hour, d.minute)}';
-  }
-
-  String get _greeting {
-    final h = _now.hour;
-    if (h < 12) return 'Bonjour';
-    if (h < 18) return 'Bon après-midi';
-    return 'Bonsoir';
   }
 
   // ───────────── UI ─────────────
@@ -376,7 +399,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
- Widget _buildTopHeroHeader() {
+  Widget _buildTopHeroHeader() {
     final phase = _phase;
     final accent = _paused ? AppC.muted : phase.color;
     final next = _next;
@@ -394,9 +417,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final topRightIcon = isNight
         ? Icons.bedtime_rounded
         : (isEvening ? Icons.wb_twilight_rounded : Icons.wb_sunny_rounded);
-    final topRightColor = isNight
-        ? AppC.night
-        : (isEvening ? AppC.dusk : AppC.sun);
+    final topRightColor =
+        isNight ? AppC.night : (isEvening ? AppC.dusk : AppC.sun);
 
     return Container(
       decoration: BoxDecoration(
@@ -418,17 +440,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 children: [
                   Expanded(
                     child: Transform.translate(
-                      offset: const Offset(-19, 0), // ← Change -4 en -8 ou -10 (plus le chiffre négatif est grand, plus il va à gauche)
+                      offset: const Offset(-6, 0),
                       child: Align(
                         alignment: Alignment.centerLeft,
                         child: SvgPicture.asset(
-                         'assets/icons/healthy_screen_logo.svg',
-                          height: 28,
+                          'assets/icons/healthy_screen_logo.svg',
+                          height: 36,
                           fit: BoxFit.contain,
                           alignment: Alignment.centerLeft,
                           colorFilter: const ColorFilter.mode(
-                         AppC.indigo, // ← Remplace par la couleur souhaitée (ex: AppC.indigo, Color(0xFF7B5CFA), Colors.white...)
-                          BlendMode.srcIn,
+                            AppC.indigo,
+                            BlendMode.srcIn,
                           ),
                           placeholderBuilder: (_) => Text(
                             'Healthy Screen',
@@ -441,7 +463,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   const SizedBox(width: 8),
                   Container(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                     decoration: BoxDecoration(
                       color: AppC.card,
                       borderRadius: BorderRadius.circular(20),
@@ -458,13 +480,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       children: [
                         Icon(
                           topRightIcon,
-                          size: 18,
+                          size: 16,
                           color: topRightColor,
                         ),
                         const SizedBox(width: 6),
                         Text(
                           topRightGreeting,
-                          style: tx(15, w: FontWeight.w700, c: AppC.ink),
+                          style: tx(12, w: FontWeight.w700, c: AppC.ink),
                         ),
                       ],
                     ),
@@ -557,7 +579,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  /// Carte conseil en indigo/violet inspirée de "Personal tip" dans Envol
+  /// Carte conseil sommeil
   Widget _buildSmartTipCard() {
     final bed = (_min(_sunrise) - 450 - 15) % 1440;
     final nightStart = (bed - 60) % 1440;
@@ -659,7 +681,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  /// Raccourcis circulaires rapides inspirés des icônes circulaires d'Envol
+  /// Raccourcis circulaires rapides des 4 phases
   Widget _buildQuickActions() {
     return AppCard(
       child: Column(
@@ -673,25 +695,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ),
           const SizedBox(height: 16),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               _CircleAction(
                 icon: Icons.wb_sunny_rounded,
                 label: 'Matin',
                 color: AppC.sun,
-                onTap: () => _previewPhase('sunrise', 'Lever du soleil'),
+                onTap: () => _previewPhase('dawn', 'Matin'),
+              ),
+              _CircleAction(
+                icon: Icons.light_mode_rounded,
+                label: 'Après-midi',
+                color: const Color(0xFF38BDF8),
+                onTap: () => _previewPhase('afternoon', 'Après-midi'),
               ),
               _CircleAction(
                 icon: Icons.wb_twilight_rounded,
-                label: 'Soirée',
+                label: 'Crépuscule',
                 color: AppC.dusk,
-                onTap: () => _previewPhase('sunset', 'Coucher du soleil'),
+                onTap: () => _previewPhase('dusk', 'Crépuscule'),
               ),
               _CircleAction(
                 icon: Icons.bedtime_rounded,
                 label: 'Nuit',
                 color: AppC.night,
-                onTap: () => _previewPhase('night', 'Nuit profonde'),
+                onTap: () => _previewPhase('night', 'Nuit'),
               ),
             ],
           ),
@@ -756,7 +784,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             height: 36,
             width: double.infinity,
             child: CustomPaint(
-              painter: _DayBarPainter(f(_sunrise), f(_sunset), f(_night), nowF),
+              painter: _DayBarPainter(
+                f(_sunrise),
+                f(_afternoon),
+                f(_sunset),
+                f(_night),
+                nowF,
+              ),
             ),
           ),
           const SizedBox(height: 6),
@@ -779,16 +813,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           _SlotTile(
             icon: Icons.wb_sunny_rounded,
             color: AppC.sun,
-            title: 'Lever du soleil',
-            subtitle: 'Fond lumineux, luminosité auto',
+            title: 'Matin',
+            subtitle: 'Fond du matin, luminosité auto',
             time: hhmm(_sunrise.hour, _sunrise.minute),
             onTap: () => _pickTime('sunrise'),
           ),
           const Divider(height: 1, color: AppC.stroke, indent: 72),
           _SlotTile(
+            icon: Icons.light_mode_rounded,
+            color: const Color(0xFF38BDF8),
+            title: 'Après-midi',
+            subtitle: 'Fond de l\'après-midi',
+            time: hhmm(_afternoon.hour, _afternoon.minute),
+            onTap: () => _pickTime('afternoon'),
+          ),
+          const Divider(height: 1, color: AppC.stroke, indent: 72),
+          _SlotTile(
             icon: Icons.wb_twilight_rounded,
             color: AppC.dusk,
-            title: 'Coucher du soleil',
+            title: 'Crépuscule',
             subtitle: 'Tons chauds, transition douce',
             time: hhmm(_sunset.hour, _sunset.minute),
             onTap: () => _pickTime('sunset'),
@@ -797,7 +840,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           _SlotTile(
             icon: Icons.bedtime_rounded,
             color: AppC.night,
-            title: 'Nuit profonde',
+            title: 'Nuit',
             subtitle: 'Fond sombre, basse luminosité',
             time: hhmm(_night.hour, _night.minute),
             onTap: () => _pickTime('night'),
@@ -843,7 +886,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               onChangeEnd: (_) {
                 HapticFeedback.selectionClick();
                 _persist();
-                if (_phase.label != 'Nuit profonde') {
+                if (_phase.label != 'Nuit') {
                   _restoreTimer?.cancel();
                   _restoreTimer = Timer(
                     const Duration(milliseconds: 1500),
@@ -878,20 +921,20 @@ class _CircleAction extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(18),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
           child: Column(
             children: [
               Container(
-                width: 54,
-                height: 54,
+                width: 50,
+                height: 50,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: withA(color, 0.14),
                 ),
-                child: Icon(icon, color: color, size: 24),
+                child: Icon(icon, color: color, size: 22),
               ),
               const SizedBox(height: 8),
-              Text(label, style: tx(12, w: FontWeight.w600, c: AppC.ink)),
+              Text(label, style: tx(11, w: FontWeight.w600, c: AppC.ink)),
             ],
           ),
         ),
@@ -1042,8 +1085,8 @@ class _RhythmRingPainter extends CustomPainter {
 }
 
 class _DayBarPainter extends CustomPainter {
-  _DayBarPainter(this.sr, this.ss, this.nt, this.now);
-  final double sr, ss, nt, now;
+  _DayBarPainter(this.sr, this.af, this.ss, this.nt, this.now);
+  final double sr, af, ss, nt, now;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1061,13 +1104,13 @@ class _DayBarPainter extends CustomPainter {
         Color(0xFF6B5CE7),
         Color(0xFF6B5CE7),
       ],
-      stops: [0, sr, (sr + ss) / 2, ss, nt, 1],
+      stops: [0, sr, af, ss, nt, 1],
     ).createShader(Rect.fromLTWH(0, 0, size.width, 1));
     canvas.drawRRect(bar, Paint()..shader = shader);
 
     final tick = Paint()..color = Colors.white;
-    for (final f in [sr, ss, nt]) {
-      canvas.drawCircle(Offset(f * size.width, y), 3.2, tick);
+    for (final f in [sr, af, ss, nt]) {
+      canvas.drawCircle(Offset(f * size.width, y), 3.0, tick);
     }
 
     final x = (now * size.width).clamp(9.0, size.width - 9.0);
@@ -1077,5 +1120,9 @@ class _DayBarPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _DayBarPainter old) =>
-      old.sr != sr || old.ss != ss || old.nt != nt || old.now != now;
+      old.sr != sr ||
+      old.af != af ||
+      old.ss != ss ||
+      old.nt != nt ||
+      old.now != now;
 }

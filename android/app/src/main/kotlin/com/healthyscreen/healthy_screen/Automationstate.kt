@@ -25,6 +25,7 @@ object AutomationState {
     fun time(ctx: Context, phase: String): Pair<Int, Int> {
         val (dh, dm) = when (phase) {
             "sunrise" -> 7 to 0
+            "afternoon" -> 14 to 0
             "sunset" -> 19 to 0
             else -> 22 to 0
         }
@@ -51,16 +52,24 @@ object AutomationState {
     fun nightBrightness(ctx: Context): Int =
         prefs(ctx).getLong("flutter.night_brightness", 50L).toInt()
 
-    /** Phase correspondant à l'heure actuelle : "sunrise" (jour), "sunset" ou "night". */
+    /** Phase correspondant à l'heure actuelle : "sunrise", "afternoon", "sunset" ou "night". */
     fun currentPhase(ctx: Context): String {
         val cal = Calendar.getInstance()
         val now = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
         val (sh, sm) = time(ctx, "sunrise")
+        val (ah, am) = time(ctx, "afternoon")
         val (uh, um) = time(ctx, "sunset")
         val (nh, nm) = time(ctx, "night")
+
+        val srMin = sh * 60 + sm
+        val afMin = ah * 60 + am
+        val ssMin = uh * 60 + um
+        val ntMin = nh * 60 + nm
+
         return when {
-            now >= nh * 60 + nm || now < sh * 60 + sm -> "night"
-            now >= uh * 60 + um -> "sunset"
+            now >= ntMin || now < srMin -> "night"
+            now >= ssMin -> "sunset"
+            now >= afMin -> "afternoon"
             else -> "sunrise"
         }
     }

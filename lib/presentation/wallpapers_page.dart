@@ -155,18 +155,19 @@ class _WallpapersPageState extends State<WallpapersPage> {
     final now = DateTime.now();
     final n = now.hour * 60 + now.minute;
     final sr = mins('sunrise', 7, 0);
+    final af = mins('afternoon', 14, 0);
     final ss = mins('sunset', 19, 0);
     final nt = mins('night', 22, 0);
 
     if (n >= nt || n < sr) return 'night';
     if (n >= ss) return 'dusk';
-    if (n < sr + 180) return 'dawn';
-    return 'afternoon';
+    if (n >= af) return 'afternoon';
+    return 'dawn';
   }
 
   String _momentToNativePhase(String moment) => switch (moment) {
         'dawn' => 'sunrise',
-        'afternoon' => 'sunrise',
+        'afternoon' => 'afternoon',
         'dusk' => 'sunset',
         _ => 'night',
       };
@@ -198,7 +199,9 @@ class _WallpapersPageState extends State<WallpapersPage> {
       final nightFile = await _materialiseAsset(pack.nightAsset, '${pack.id}_night');
 
       if (dawnFile != null) await _bridge.importWallpaper('sunrise', dawnFile);
-      if (afternoonFile != null) await _bridge.importWallpaper('day', afternoonFile);
+      if (afternoonFile != null) {
+        await _bridge.importWallpaper('afternoon', afternoonFile);
+      }
       if (duskFile != null) await _bridge.importWallpaper('sunset', duskFile);
       if (nightFile != null) await _bridge.importWallpaper('night', nightFile);
 

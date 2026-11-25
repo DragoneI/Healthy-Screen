@@ -1,7 +1,8 @@
-﻿
-class ScheduleConfig {
+﻿class ScheduleConfig {
   final int sunriseHour;
   final int sunriseMinute;
+  final int afternoonHour;
+  final int afternoonMinute;
   final int sunsetHour;
   final int sunsetMinute;
   final int nightHour;
@@ -11,6 +12,8 @@ class ScheduleConfig {
   ScheduleConfig({
     required this.sunriseHour,
     required this.sunriseMinute,
+    this.afternoonHour = 14,
+    this.afternoonMinute = 0,
     required this.sunsetHour,
     required this.sunsetMinute,
     required this.nightHour,
@@ -22,6 +25,8 @@ class ScheduleConfig {
     return {
       'sunriseHour': sunriseHour,
       'sunriseMinute': sunriseMinute,
+      'afternoonHour': afternoonHour,
+      'afternoonMinute': afternoonMinute,
       'sunsetHour': sunsetHour,
       'sunsetMinute': sunsetMinute,
       'nightHour': nightHour,

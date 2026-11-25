@@ -64,26 +64,30 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 "saveSchedule" -> {
-                    val args = call.arguments as? Map<*, *>
-                    if (args != null) {
-                        @Suppress("UNCHECKED_CAST")
-                        val map = args as Map<String, Any>
-                        ScheduleStore.saveConfig(context, map)
+              val args = call.arguments as? Map<*, *>
+              if (args != null) {
+              @Suppress("UNCHECKED_CAST")
+              val map = args as Map<String, Any>
+              ScheduleStore.saveConfig(context, map)
 
-                        val sHour = map["sunriseHour"] as? Int ?: 7
-                        val sMin = map["sunriseMinute"] as? Int ?: 0
-                        AlarmScheduler.schedule(context, "sunrise", sHour, sMin)
+              val sHour = (map["sunriseHour"] as? Number)?.toInt() ?: 7
+              val sMin = (map["sunriseMinute"] as? Number)?.toInt() ?: 0
+              AlarmScheduler.schedule(context, "sunrise", sHour, sMin)
 
-                        val suHour = map["sunsetHour"] as? Int ?: 19
-                        val suMin = map["sunsetMinute"] as? Int ?: 0
-                        AlarmScheduler.schedule(context, "sunset", suHour, suMin)
+              val aHour = (map["afternoonHour"] as? Number)?.toInt() ?: 14
+              val aMin = (map["afternoonMinute"] as? Number)?.toInt() ?: 0
+              AlarmScheduler.schedule(context, "afternoon", aHour, aMin)
 
-                        val nHour = map["nightHour"] as? Int ?: 22
-                        val nMin = map["nightMinute"] as? Int ?: 0
-                        AlarmScheduler.schedule(context, "night", nHour, nMin)
-                    }
-                    result.success(null)
-                }
+              val suHour = (map["sunsetHour"] as? Number)?.toInt() ?: 19
+              val suMin = (map["sunsetMinute"] as? Number)?.toInt() ?: 0
+              AlarmScheduler.schedule(context, "sunset", suHour, suMin)
+
+              val nHour = (map["nightHour"] as? Number)?.toInt() ?: 22
+              val nMin = (map["nightMinute"] as? Number)?.toInt() ?: 0
+              AlarmScheduler.schedule(context, "night", nHour, nMin)
+              }
+                result.success(null)
+              }
                 "previewBrightness" -> {
                     val level = call.argument<Number>("level")?.toInt() ?: 50
                     PhaseApplier.previewBrightness(applicationContext, level)
@@ -115,9 +119,9 @@ class MainActivity : FlutterActivity() {
                 }
 
                 "getWallpapers" -> {
-                    val slots = listOf("original", "sunrise", "sunset", "night")
-                    result.success(slots.associateWith { WallpaperStore.get(applicationContext, it)?.absolutePath })
-                }
+                        val slots = listOf("original", "sunrise", "afternoon", "sunset", "night")
+                   result.success(slots.associateWith { WallpaperStore.get(applicationContext, it)?.absolutePath })
+               }
                 "importWallpaper" -> {
                     val slot = call.argument<String>("slot")
                     val path = call.argument<String>("path")

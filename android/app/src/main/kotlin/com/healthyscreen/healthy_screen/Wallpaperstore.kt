@@ -1,19 +1,19 @@
 package com.healthyscreen.healthy_screen
 
+import android.app.WallpaperManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.ceil
 import kotlin.math.max
-import android.app.WallpaperManager
-import android.graphics.Canvas
-import android.graphics.drawable.BitmapDrawable
 
 /**
  * Stocke les fonds choisis par l'utilisateur dans filesDir/wallpapers/<slot>_<timestamp>.jpg
- * Slots : "original" (fond habituel, remis à la pause), "sunrise", "sunset", "night".
+ * Slots : "original" (fond habituel, remis à la pause), "sunrise", "afternoon", "sunset", "night".
  */
 object WallpaperStore {
     private fun dir(ctx: Context): File = File(ctx.filesDir, "wallpapers").apply { mkdirs() }
@@ -62,8 +62,8 @@ object WallpaperStore {
     /** Copie l'image choisie, la recadre à la taille de l'écran et retourne son chemin. */
     fun importImage(ctx: Context, slot: String, srcPath: String): String? {
         val dm = ctx.resources.displayMetrics
-        val w = dm.widthPixels
-        val h = dm.heightPixels
+        val w = dm.widthPixels.coerceAtLeast(1)
+        val h = dm.heightPixels.coerceAtLeast(1)
 
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(srcPath, bounds)
@@ -86,10 +86,20 @@ object WallpaperStore {
 
     /** Remplit tout l'écran sans déformer l'image (recadrage centré). */
     fun coverCrop(src: Bitmap, w: Int, h: Int): Bitmap {
-        val scale = max(w.toFloat() / src.width, h.toFloat() / src.height)
-        val sw = max(w, ceil(src.width * scale).toInt())
-        val sh = max(h, ceil(src.height * scale).toInt())
+        val targetW = w.coerceAtLeast(1)
+        val targetH = h.coerceAtLeast(1)
+        val srcW = src.width.coerceAtLeast(1)
+        val srcH = src.height.coerceAtLeast(1)
+
+        val scale = max(targetW.toFloat() / srcW, targetH.toFloat() / srcH)
+        val sw = max(targetW, ceil(srcW * scale).toInt())
+        val sh = max(targetH, ceil(srcH * scale).toInt())
         val scaled = Bitmap.createScaledBitmap(src, sw, sh, true)
-        return Bitmap.createBitmap(scaled, (sw - w) / 2, (sh - h) / 2, w, h)
+
+        val cropW = targetW.coerceAtMost(scaled.width)
+        val cropH = targetH.coerceAtMost(scaled.height)
+        val dx = ((scaled.width - cropW) / 2).coerceAtLeast(0)
+        val dy = ((scaled.height - cropH) / 2).coerceAtLeast(0)
+        return Bitmap.createBitmap(scaled, dx, dy, cropW, cropH)
     }
 }
