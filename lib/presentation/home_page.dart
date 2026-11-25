@@ -134,16 +134,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     await p.setInt('night_brightness', _brightness.toInt());
 
     await _bridge.saveSchedule(
-      ScheduleConfig(
-        sunriseHour: _sunrise.hour,
-        sunriseMinute: _sunrise.minute,
-        sunsetHour: _sunset.hour,
-        sunsetMinute: _sunset.minute,
-        nightHour: _night.hour,
-        nightMinute: _night.minute,
-        nightBrightness: _brightness.toInt(),
-      ),
-    );
+  ScheduleConfig(
+    sunriseHour: _sunrise.hour,
+    sunriseMinute: _sunrise.minute,
+    afternoonHour: _afternoon.hour,
+    afternoonMinute: _afternoon.minute,
+    sunsetHour: _sunset.hour,
+    sunsetMinute: _sunset.minute,
+    nightHour: _night.hour,
+    nightMinute: _night.minute,
+    nightBrightness: _brightness.toInt(),
+  ),
+);
   }
 
   Future<void> _setPause(int value) async {
@@ -440,7 +442,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 children: [
                   Expanded(
                     child: Transform.translate(
-                      offset: const Offset(-6, 0),
+                      offset: const Offset(-15, 0),
                       child: Align(
                         alignment: Alignment.centerLeft,
                         child: SvgPicture.asset(
