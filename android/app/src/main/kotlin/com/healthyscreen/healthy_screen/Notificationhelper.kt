@@ -118,4 +118,41 @@ object NotificationHelper {
 
         NotificationManagerCompat.from(ctx).notify(FOCUS_NOTIF_ID, notification)
     }
+    fun showPhaseTransition(ctx: Context, phase: String) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) return
+
+        ensureChannel(ctx)
+
+        val (title, body) = when (phase) {
+            "sunrise" -> "Bonjour ☀️" to
+                "Douce lumière du matin. Prenez un instant pour respirer et démarrer la journée à votre rythme."
+            "afternoon", "day" -> "Bon après-midi 🌤️" to
+                "La journée avance : pensez à boire un peu d'eau et à reposer vos yeux quelques secondes."
+            "sunset" -> "Le jour décline 🌅" to
+                "Le crépuscule s'installe en douceur pour vous aider à lever le pied."
+            else -> "Il est temps de ralentir 🌙" to
+                "Écran apaisé. Posez le téléphone pour préparer une nuit reposante."
+        }
+
+        val openApp = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)?.let {
+            PendingIntent.getActivity(ctx, phase.hashCode(), it, FLAGS)
+        }
+
+        val notification = NotificationCompat.Builder(ctx, CHANNEL_ID)
+            .setSmallIcon(ctx.applicationInfo.icon)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setColor(0xFF2DD4BF.toInt())
+            .setAutoCancel(true)
+            .setContentIntent(openApp)
+            .build()
+
+        NotificationManagerCompat.from(ctx).notify(NOTIF_ID + phase.hashCode().and(0xFF), notification)
+    }
 }

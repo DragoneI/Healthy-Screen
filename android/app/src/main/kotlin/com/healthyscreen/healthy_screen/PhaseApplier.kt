@@ -15,8 +15,10 @@ object PhaseApplier {
     private const val KEY_PREV_MODE = "prev_brightness_mode"
     private const val KEY_PREV_LEVEL = "prev_brightness_level"
 
-    private const val MORNING_BRIGHTNESS = 135
-    private const val AFTERNOON_BRIGHTNESS = 220
+    // Niveaux calibrés (0..255) : matin doux, après-midi modéré, nuit sombre
+    private const val MORNING_LEVEL = 20
+    private const val AFTERNOON_LEVEL = 115
+    private const val NIGHT_LEVEL = 3
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var duskRunnable: Runnable? = null
@@ -26,13 +28,13 @@ object PhaseApplier {
         cancelDuskRamp()
         setWallpaper(appCtx, phase)
 
-        val nightLevel = AutomationState.nightBrightness(appCtx).coerceIn(10, 255)
+        val nightTarget = NIGHT_LEVEL.coerceIn(1, 14)
 
         when (phase) {
-            "night" -> setManualBrightness(appCtx, nightLevel)
-            "sunrise" -> setManualBrightness(appCtx, MORNING_BRIGHTNESS)
-            "afternoon", "day" -> setManualBrightness(appCtx, AFTERNOON_BRIGHTNESS)
-            "sunset" -> startDuskRamp(appCtx, AFTERNOON_BRIGHTNESS, nightLevel)
+            "night" -> setManualBrightness(appCtx, nightTarget)
+            "sunrise" -> setManualBrightness(appCtx, MORNING_LEVEL)
+            "afternoon", "day" -> setManualBrightness(appCtx, AFTERNOON_LEVEL)
+            "sunset" -> startDuskRamp(appCtx, AFTERNOON_LEVEL, nightTarget)
         }
     }
 
@@ -40,13 +42,13 @@ object PhaseApplier {
         val (sh, sm) = AutomationState.time(ctx, "sunset")
         val (nh, nm) = AutomationState.time(ctx, "night")
 
-        val nowCal = Calendar.getInstance()
+        val nowMsNow = System.currentTimeMillis()
         val endCal = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, nh)
             set(Calendar.MINUTE, nm)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
-            if (timeInMillis <= nowCal.timeInMillis) {
+            if (timeInMillis <= nowMsNow) {
                 add(Calendar.DAY_OF_YEAR, 1)
             }
         }
@@ -62,22 +64,23 @@ object PhaseApplier {
         }
 
         val totalMs = (endCal.timeInMillis - startCal.timeInMillis).coerceAtLeast(60_000L)
-        val stepIntervalMs = 15_000L // mise à jour progressive toutes les 15 s
+        val stepMs = 30_000L
 
         fun step() {
             if (AutomationState.isPaused(ctx)) return
             val nowMs = System.currentTimeMillis()
-            val fraction = ((nowMs - startCal.timeInMillis).toFloat() / totalMs.toFloat())
+            val t = ((nowMs - startCal.timeInMillis).toFloat() / totalMs.toFloat())
                 .coerceIn(0f, 1f)
-            val interpolated = (startLevel + (endLevel - startLevel) * fraction)
+            val eased = t * t * (3f - 2f * t)
+            val value = (startLevel + (endLevel - startLevel) * eased)
                 .toInt()
-                .coerceIn(1, 255)
-            setManualBrightness(ctx, interpolated)
+                .coerceIn(1, 140)
+            setManualBrightness(ctx, value)
 
-            if (fraction < 1f) {
+            if (t < 1f) {
                 val r = Runnable { step() }
                 duskRunnable = r
-                mainHandler.postDelayed(r, stepIntervalMs)
+                mainHandler.postDelayed(r, stepMs)
             }
         }
 
@@ -89,13 +92,8 @@ object PhaseApplier {
         duskRunnable = null
     }
 
-    /** Réapplique la phase correspondant à l'heure actuelle (reprise après pause). */
     fun applyCurrent(ctx: Context) = apply(ctx, AutomationState.currentPhase(ctx))
 
-    /**
-     * Pause : remet le fond d'écran habituel (ou efface les fonds appliqués)
-     * et remet la luminosité d'avant.
-     */
     fun release(ctx: Context) {
         cancelDuskRamp()
         try {
@@ -117,8 +115,9 @@ object PhaseApplier {
         restoreBrightness(ctx)
     }
 
-    /** Aperçu en direct depuis le curseur de l'app. */
-    fun previewBrightness(ctx: Context, level: Int) = setManualBrightness(ctx, level)
+    fun previewBrightness(ctx: Context, level: Int) {
+        setManualBrightness(ctx, level.coerceIn(1, 140))
+    }
 
     private fun setWallpaper(ctx: Context, phase: String) {
         try {
@@ -126,6 +125,7 @@ object PhaseApplier {
             val file = WallpaperStore.get(ctx, phase)
                 ?: when (phase) {
                     "afternoon", "day" -> WallpaperStore.get(ctx, "sunrise")
+                    "sunset" -> WallpaperStore.get(ctx, "afternoon") ?: WallpaperStore.get(ctx, "sunrise")
                     else -> null
                 }
                 ?: return
@@ -149,7 +149,7 @@ object PhaseApplier {
             cr, Settings.System.SCREEN_BRIGHTNESS_MODE,
             Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
         )
-        val level = Settings.System.getInt(cr, Settings.System.SCREEN_BRIGHTNESS, 128)
+        val level = Settings.System.getInt(cr, Settings.System.SCREEN_BRIGHTNESS, 100)
         sp.edit().putInt(KEY_PREV_MODE, mode).putInt(KEY_PREV_LEVEL, level).commit()
     }
 
@@ -159,16 +159,16 @@ object PhaseApplier {
         try {
             backupBrightnessIfNeeded(ctx)
             Settings.System.putInt(
-                cr, Settings.System.SCREEN_BRIGHTNESS_MODE,
+                cr,
+                Settings.System.SCREEN_BRIGHTNESS_MODE,
                 Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
             )
-            Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS, level.coerceIn(1, 255))
+            Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS, level.coerceIn(1, 140))
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
-    /** Remet le mode et le niveau d'avant ; sinon, retour en luminosité automatique. */
     fun restoreBrightness(ctx: Context) {
         cancelDuskRamp()
         if (!Settings.System.canWrite(ctx)) return
@@ -177,15 +177,22 @@ object PhaseApplier {
         try {
             if (sp.contains(KEY_PREV_MODE)) {
                 val mode = sp.getInt(KEY_PREV_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC)
-                val level = sp.getInt(KEY_PREV_LEVEL, 128)
-                Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS, level.coerceIn(1, 255))
-                Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS_MODE, mode)
+                val level = sp.getInt(KEY_PREV_LEVEL, 100).coerceIn(1, 140)
+                if (mode == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC) {
+                    Settings.System.putInt(
+                        cr,
+                        Settings.System.SCREEN_BRIGHTNESS_MODE,
+                        Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
+                    )
+                } else {
+                    Settings.System.putInt(
+                        cr,
+                        Settings.System.SCREEN_BRIGHTNESS_MODE,
+                        Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+                    )
+                    Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS, level)
+                }
                 sp.edit().remove(KEY_PREV_MODE).remove(KEY_PREV_LEVEL).commit()
-            } else {
-                Settings.System.putInt(
-                    cr, Settings.System.SCREEN_BRIGHTNESS_MODE,
-                    Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
-                )
             }
         } catch (e: Exception) {
             e.printStackTrace()

@@ -26,16 +26,33 @@ object UsageHelper {
         return mode == AppOpsManager.MODE_ALLOWED
     }
 
-    /**
-     * Retourne {"daily": [min x7, du plus ancien à aujourd'hui], "top": [{name, minutes} x4]}.
-     * Le temps compté est le temps passé au premier plan par les applications.
-     */
+    private fun mergedDurationMs(intervals: List<Pair<Long, Long>>): Long {
+        if (intervals.isEmpty()) return 0L
+        val sorted = intervals.sortedBy { it.first }
+        var total = 0L
+        var curStart = sorted[0].first
+        var curEnd = sorted[0].second
+
+        for (i in 1 until sorted.size) {
+            val (s, e) = sorted[i]
+            if (e <= curStart) continue
+            if (s <= curEnd) {
+                if (e > curEnd) curEnd = e
+            } else {
+                total += (curEnd - curStart).coerceAtLeast(0L)
+                curStart = s
+                curEnd = e
+            }
+        }
+        total += (curEnd - curStart).coerceAtLeast(0L)
+        return total
+    }
+
     @Suppress("DEPRECATION")
     fun weekly(ctx: Context): Map<String, Any> {
         val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val now = System.currentTimeMillis()
 
-        // bornes de minuit des 7 jours (+ demain)
         val bounds = LongArray(8)
         val c = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
@@ -52,22 +69,30 @@ object UsageHelper {
         val home = ctx.packageManager
             .resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)
             ?.activityInfo?.packageName
-        val excluded = setOf(ctx.packageName, home, "com.android.systemui")
+        val excluded = setOf(
+            ctx.packageName,
+            home,
+            "com.android.systemui",
+            "android"
+        )
 
-        val perDay = LongArray(7)
-        val perAppToday = HashMap<String, Long>()
+        val dayIntervals = Array(7) { mutableListOf<Pair<Long, Long>>() }
+        val appIntervalsToday = HashMap<String, MutableList<Pair<Long, Long>>>()
 
-        fun add(pkg: String, start: Long, end: Long) {
+        fun recordInterval(pkg: String, rawStart: Long, rawEnd: Long, maxSpanMs: Long) {
             if (pkg in excluded) return
-            val s = maxOf(start, bounds[0])
-            val t = minOf(end, now)
-            if (t <= s) return
+            val clampedStart = maxOf(rawStart, bounds[0], rawEnd - maxSpanMs)
+            val clampedEnd = minOf(rawEnd, now)
+            if (clampedEnd <= clampedStart) return
+
             for (d in 0..6) {
-                val a = maxOf(s, bounds[d])
-                val b = minOf(t, bounds[d + 1])
+                val a = maxOf(clampedStart, bounds[d])
+                val b = minOf(clampedEnd, bounds[d + 1])
                 if (b > a) {
-                    perDay[d] += b - a
-                    if (d == 6) perAppToday[pkg] = (perAppToday[pkg] ?: 0L) + (b - a)
+                    dayIntervals[d].add(a to b)
+                    if (d == 6) {
+                        appIntervalsToday.getOrPut(pkg) { mutableListOf() }.add(a to b)
+                    }
                 }
             }
         }
@@ -75,26 +100,46 @@ object UsageHelper {
         val events = usm.queryEvents(bounds[0], now)
         val e = UsageEvents.Event()
         val foreground = HashMap<String, Long>()
+
         while (events.hasNextEvent()) {
             events.getNextEvent(e)
             val pkg = e.packageName ?: continue
             when (e.eventType) {
-                UsageEvents.Event.MOVE_TO_FOREGROUND -> foreground[pkg] = e.timeStamp
-                UsageEvents.Event.MOVE_TO_BACKGROUND ->
-                    foreground.remove(pkg)?.let { add(pkg, it, e.timeStamp) }
+                UsageEvents.Event.MOVE_TO_FOREGROUND -> {
+                    foreground[pkg] = e.timeStamp
+                }
+                UsageEvents.Event.MOVE_TO_BACKGROUND -> {
+                    val start = foreground.remove(pkg)
+                    if (start != null) {
+                        // Session fermée normalement : plafond généreux de 6 h
+                        recordInterval(pkg, start, e.timeStamp, 6 * 3600_000L)
+                    }
+                }
             }
         }
-        foreground.forEach { (pkg, start) -> add(pkg, start, now) }
 
-        val top = perAppToday.entries
-            .sortedByDescending { it.value }
-            .map { label(ctx, it.key) to (it.value / 60000).toInt() }
+        // Session encore ouverte à l'instant `now` : limitée aux 15 dernières min max
+        for ((pkg, start) in foreground) {
+            recordInterval(pkg, start, now, 15 * 60_000L)
+        }
+
+        val perDayMin = (0..6).map { d ->
+            val ms = mergedDurationMs(dayIntervals[d]).coerceAtMost(24 * 3600_000L)
+            (ms / 60_000L).toInt()
+        }
+
+        val top = appIntervalsToday.entries
+            .map { (pkg, list) ->
+                val mins = (mergedDurationMs(list).coerceAtMost(24 * 3600_000L) / 60_000L).toInt()
+                label(ctx, pkg) to mins
+            }
             .filter { it.second >= 1 }
+            .sortedByDescending { it.second }
             .take(4)
             .map { mapOf("name" to it.first, "minutes" to it.second) }
 
         return mapOf(
-            "daily" to perDay.map { (it / 60000).toInt() },
+            "daily" to perDayMin,
             "top" to top
         )
     }
@@ -102,7 +147,7 @@ object UsageHelper {
     private fun label(ctx: Context, pkg: String): String = try {
         val pm = ctx.packageManager
         pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         pkg.substringAfterLast('.').replaceFirstChar { it.uppercase() }
     }
 }

@@ -33,20 +33,18 @@ class PhaseReceiver : BroadcastReceiver() {
                     return@Thread
                 }
 
-                // 1) On reprogramme TOUJOURS la prochaine alarme, avec les horaires de
-                //    l'utilisateur (plus de 7h/19h/22h en dur), même en pause : la chaîne
-                //    d'alarmes ne doit jamais se casser.
+                // 1) Reprogramme toujours la prochaine alarme avec les horaires configurés.
                 val (h, m) = AutomationState.time(ctx, phase)
                 AlarmScheduler.schedule(ctx, phase, h, m)
 
-                // 2) On n'applique le fond d'écran / la luminosité que si non en pause.
+                // 2) Applique le fond, la luminosité et la notification si non en pause.
                 if (!AutomationState.isPaused(ctx)) {
                     PhaseApplier.apply(ctx, phase)
-                    if (phase == "night") NotificationHelper.showBedtime(ctx)
+                    NotificationHelper.showPhaseTransition(ctx, phase)
                 }
             } finally {
                 pending.finish()
             }
         }.start()
     }
-}    
+}

@@ -297,6 +297,7 @@ Future<void> _previewPhase(String phase, String label) async {
   HapticFeedback.selectionClick();
   try {
     await _bridge.applyPhaseNow(phase);
+    await Future<void>.delayed(const Duration(milliseconds: 1500));
     if (mounted) showToast(context, 'Phase « $label » appliquée');
   } finally {
     if (mounted) setState(() => _applyingPhase = null);
@@ -692,7 +693,7 @@ Future<void> _previewPhase(String phase, String label) async {
   }
 
   /// Raccourcis circulaires rapides des 4 phases
- Widget _buildQuickActions() {
+Widget _buildQuickActions() {
   final isBusy = _applyingPhase != null;
   return AppCard(
     child: Column(
@@ -700,21 +701,36 @@ Future<void> _previewPhase(String phase, String label) async {
       children: [
         Text('Tester une ambiance', style: tx(15, w: FontWeight.w700)),
         const SizedBox(height: 4),
-        Text(
-          isBusy
-              ? 'Veuillez patienter, application du fond d\'écran en cours…'
-              : 'Appliquez instantanément le fond d\'écran d\'une phase',
-          style: tx(
-            12,
-            w: isBusy ? FontWeight.w600 : FontWeight.w400,
-            c: isBusy ? AppC.indigo : AppC.muted,
+        if (isBusy)
+          Row(
+            children: [
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppC.indigo,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Veuillez patienter, application de l\'ambiance en cours…',
+                  style: tx(12, w: FontWeight.w600, c: AppC.indigo),
+                ),
+              ),
+            ],
+          )
+        else
+          Text(
+            'Appliquez instantanément le fond d\'écran d\'une phase',
+            style: tx(12, c: AppC.muted),
           ),
-        ),
         const SizedBox(height: 16),
         IgnorePointer(
           ignoring: isBusy,
           child: Opacity(
-            opacity: isBusy ? 0.55 : 1.0,
+            opacity: isBusy ? 0.45 : 1.0,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
