@@ -23,8 +23,7 @@ class MainActivity : FlutterActivity() {
                     result.success(Settings.System.canWrite(context))
                 }
                 "openWriteSettings" -> {
-                    val intent = Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS)
-                    startActivity(intent)
+                    startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS))
                     result.success(null)
                 }
                 "canScheduleExact" -> {
@@ -64,30 +63,30 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 "saveSchedule" -> {
-              val args = call.arguments as? Map<*, *>
-              if (args != null) {
-              @Suppress("UNCHECKED_CAST")
-              val map = args as Map<String, Any>
-              ScheduleStore.saveConfig(context, map)
+                    val args = call.arguments as? Map<*, *>
+                    if (args != null) {
+                        @Suppress("UNCHECKED_CAST")
+                        val map = args as Map<String, Any>
+                        ScheduleStore.saveConfig(context, map)
 
-              val sHour = (map["sunriseHour"] as? Number)?.toInt() ?: 7
-              val sMin = (map["sunriseMinute"] as? Number)?.toInt() ?: 0
-              AlarmScheduler.schedule(context, "sunrise", sHour, sMin)
+                        val sHour = (map["sunriseHour"] as? Number)?.toInt() ?: 7
+                        val sMin = (map["sunriseMinute"] as? Number)?.toInt() ?: 0
+                        AlarmScheduler.schedule(context, "sunrise", sHour, sMin)
 
-              val aHour = (map["afternoonHour"] as? Number)?.toInt() ?: 14
-              val aMin = (map["afternoonMinute"] as? Number)?.toInt() ?: 0
-              AlarmScheduler.schedule(context, "afternoon", aHour, aMin)
+                        val aHour = (map["afternoonHour"] as? Number)?.toInt() ?: 14
+                        val aMin = (map["afternoonMinute"] as? Number)?.toInt() ?: 0
+                        AlarmScheduler.schedule(context, "afternoon", aHour, aMin)
 
-              val suHour = (map["sunsetHour"] as? Number)?.toInt() ?: 19
-              val suMin = (map["sunsetMinute"] as? Number)?.toInt() ?: 0
-              AlarmScheduler.schedule(context, "sunset", suHour, suMin)
+                        val suHour = (map["sunsetHour"] as? Number)?.toInt() ?: 19
+                        val suMin = (map["sunsetMinute"] as? Number)?.toInt() ?: 0
+                        AlarmScheduler.schedule(context, "sunset", suHour, suMin)
 
-              val nHour = (map["nightHour"] as? Number)?.toInt() ?: 22
-              val nMin = (map["nightMinute"] as? Number)?.toInt() ?: 0
-              AlarmScheduler.schedule(context, "night", nHour, nMin)
-              }
-                result.success(null)
-              }
+                        val nHour = (map["nightHour"] as? Number)?.toInt() ?: 22
+                        val nMin = (map["nightMinute"] as? Number)?.toInt() ?: 0
+                        AlarmScheduler.schedule(context, "night", nHour, nMin)
+                    }
+                    result.success(null)
+                }
                 "previewBrightness" -> {
                     val level = call.argument<Number>("level")?.toInt() ?: 50
                     PhaseApplier.previewBrightness(applicationContext, level)
@@ -102,7 +101,6 @@ class MainActivity : FlutterActivity() {
                     Thread { PauseController.setPaused(applicationContext, until) }.start()
                     result.success(null)
                 }
-
                 "captureOriginalWallpaper" -> {
                     Thread {
                         val out = WallpaperStore.captureCurrentWallpaper(applicationContext)
@@ -117,11 +115,10 @@ class MainActivity : FlutterActivity() {
                     }.start()
                     result.success(null)
                 }
-
                 "getWallpapers" -> {
-                        val slots = listOf("original", "sunrise", "afternoon", "sunset", "night")
-                   result.success(slots.associateWith { WallpaperStore.get(applicationContext, it)?.absolutePath })
-               }
+                    val slots = listOf("original", "sunrise", "afternoon", "sunset", "night")
+                    result.success(slots.associateWith { WallpaperStore.get(applicationContext, it)?.absolutePath })
+                }
                 "importWallpaper" -> {
                     val slot = call.argument<String>("slot")
                     val path = call.argument<String>("path")
@@ -142,16 +139,18 @@ class MainActivity : FlutterActivity() {
                     call.argument<String>("slot")?.let { WallpaperStore.remove(applicationContext, it) }
                     result.success(null)
                 }
-                "applyPhaseNow" -> {
-                    val phase = call.argument<String>("phase") ?: "night"
-                    Thread { PhaseApplier.apply(applicationContext, phase) }.start()
-                    result.success(null)
-                }
                 "hasUsageAccess" -> {
                     result.success(UsageHelper.hasAccess(applicationContext))
                 }
                 "openUsageAccess" -> {
-                    startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                    val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                    try {
+                        startActivity(intent)
+                    } catch (_: Exception) {
+                        startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                    }
                     result.success(null)
                 }
                 "getScreenTime" -> {

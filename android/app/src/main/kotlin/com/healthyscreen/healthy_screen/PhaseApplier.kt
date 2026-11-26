@@ -5,21 +5,88 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
+import java.util.Calendar
 
 object PhaseApplier {
     private const val NATIVE_PREFS = "healthy_screen_native"
     private const val KEY_PREV_MODE = "prev_brightness_mode"
     private const val KEY_PREV_LEVEL = "prev_brightness_level"
 
-    fun apply(ctx: Context, phase: String) {
-        setWallpaper(ctx, phase)
+    private const val MORNING_BRIGHTNESS = 135
+    private const val AFTERNOON_BRIGHTNESS = 220
 
-        if (phase == "night") {
-            dimBrightness(ctx, AutomationState.nightBrightness(ctx))
-        } else if (phase == "sunrise" || phase == "afternoon" || phase == "day") {
-            restoreBrightness(ctx)
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var duskRunnable: Runnable? = null
+
+    fun apply(ctx: Context, phase: String) {
+        val appCtx = ctx.applicationContext
+        cancelDuskRamp()
+        setWallpaper(appCtx, phase)
+
+        val nightLevel = AutomationState.nightBrightness(appCtx).coerceIn(10, 255)
+
+        when (phase) {
+            "night" -> setManualBrightness(appCtx, nightLevel)
+            "sunrise" -> setManualBrightness(appCtx, MORNING_BRIGHTNESS)
+            "afternoon", "day" -> setManualBrightness(appCtx, AFTERNOON_BRIGHTNESS)
+            "sunset" -> startDuskRamp(appCtx, AFTERNOON_BRIGHTNESS, nightLevel)
         }
+    }
+
+    private fun startDuskRamp(ctx: Context, startLevel: Int, endLevel: Int) {
+        val (sh, sm) = AutomationState.time(ctx, "sunset")
+        val (nh, nm) = AutomationState.time(ctx, "night")
+
+        val nowCal = Calendar.getInstance()
+        val endCal = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, nh)
+            set(Calendar.MINUTE, nm)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            if (timeInMillis <= nowCal.timeInMillis) {
+                add(Calendar.DAY_OF_YEAR, 1)
+            }
+        }
+
+        val startCal = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, sh)
+            set(Calendar.MINUTE, sm)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            if (timeInMillis > endCal.timeInMillis) {
+                add(Calendar.DAY_OF_YEAR, -1)
+            }
+        }
+
+        val totalMs = (endCal.timeInMillis - startCal.timeInMillis).coerceAtLeast(60_000L)
+        val stepIntervalMs = 15_000L // mise à jour progressive toutes les 15 s
+
+        fun step() {
+            if (AutomationState.isPaused(ctx)) return
+            val nowMs = System.currentTimeMillis()
+            val fraction = ((nowMs - startCal.timeInMillis).toFloat() / totalMs.toFloat())
+                .coerceIn(0f, 1f)
+            val interpolated = (startLevel + (endLevel - startLevel) * fraction)
+                .toInt()
+                .coerceIn(1, 255)
+            setManualBrightness(ctx, interpolated)
+
+            if (fraction < 1f) {
+                val r = Runnable { step() }
+                duskRunnable = r
+                mainHandler.postDelayed(r, stepIntervalMs)
+            }
+        }
+
+        step()
+    }
+
+    private fun cancelDuskRamp() {
+        duskRunnable?.let { mainHandler.removeCallbacks(it) }
+        duskRunnable = null
     }
 
     /** Réapplique la phase correspondant à l'heure actuelle (reprise après pause). */
@@ -30,6 +97,7 @@ object PhaseApplier {
      * et remet la luminosité d'avant.
      */
     fun release(ctx: Context) {
+        cancelDuskRamp()
         try {
             val original = WallpaperStore.get(ctx, "original")
                 ?.let { BitmapFactory.decodeFile(it.absolutePath) }
@@ -50,7 +118,7 @@ object PhaseApplier {
     }
 
     /** Aperçu en direct depuis le curseur de l'app. */
-    fun previewBrightness(ctx: Context, level: Int) = dimBrightness(ctx, level)
+    fun previewBrightness(ctx: Context, level: Int) = setManualBrightness(ctx, level)
 
     private fun setWallpaper(ctx: Context, phase: String) {
         try {
@@ -85,7 +153,7 @@ object PhaseApplier {
         sp.edit().putInt(KEY_PREV_MODE, mode).putInt(KEY_PREV_LEVEL, level).commit()
     }
 
-    private fun dimBrightness(ctx: Context, level: Int) {
+    private fun setManualBrightness(ctx: Context, level: Int) {
         if (!Settings.System.canWrite(ctx)) return
         val cr = ctx.contentResolver
         try {
@@ -102,6 +170,7 @@ object PhaseApplier {
 
     /** Remet le mode et le niveau d'avant ; sinon, retour en luminosité automatique. */
     fun restoreBrightness(ctx: Context) {
+        cancelDuskRamp()
         if (!Settings.System.canWrite(ctx)) return
         val cr = ctx.contentResolver
         val sp = ctx.getSharedPreferences(NATIVE_PREFS, Context.MODE_PRIVATE)

@@ -289,11 +289,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _load();
   }
 
-  Future<void> _previewPhase(String phase, String label) async {
-    HapticFeedback.selectionClick();
+  String? _applyingPhase;
+
+Future<void> _previewPhase(String phase, String label) async {
+  if (_applyingPhase != null) return;
+  setState(() => _applyingPhase = phase);
+  HapticFeedback.selectionClick();
+  try {
     await _bridge.applyPhaseNow(phase);
     if (mounted) showToast(context, 'Phase « $label » appliquée');
+  } finally {
+    if (mounted) setState(() => _applyingPhase = null);
   }
+}
 
   // ───────────── Calculs ─────────────
   _Phase get _phase {
@@ -684,51 +692,64 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   /// Raccourcis circulaires rapides des 4 phases
-  Widget _buildQuickActions() {
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Tester une ambiance', style: tx(15, w: FontWeight.w700)),
-          const SizedBox(height: 4),
-          Text(
-            'Appliquez instantanément le fond d\'écran d\'une phase',
-            style: tx(12, c: AppC.muted),
+ Widget _buildQuickActions() {
+  final isBusy = _applyingPhase != null;
+  return AppCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Tester une ambiance', style: tx(15, w: FontWeight.w700)),
+        const SizedBox(height: 4),
+        Text(
+          isBusy
+              ? 'Veuillez patienter, application du fond d\'écran en cours…'
+              : 'Appliquez instantanément le fond d\'écran d\'une phase',
+          style: tx(
+            12,
+            w: isBusy ? FontWeight.w600 : FontWeight.w400,
+            c: isBusy ? AppC.indigo : AppC.muted,
           ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _CircleAction(
-                icon: Icons.wb_sunny_rounded,
-                label: 'Matin',
-                color: AppC.sun,
-                onTap: () => _previewPhase('dawn', 'Matin'),
-              ),
-              _CircleAction(
-                icon: Icons.light_mode_rounded,
-                label: 'Après-midi',
-                color: const Color(0xFF38BDF8),
-                onTap: () => _previewPhase('afternoon', 'Après-midi'),
-              ),
-              _CircleAction(
-                icon: Icons.wb_twilight_rounded,
-                label: 'Crépuscule',
-                color: AppC.dusk,
-                onTap: () => _previewPhase('dusk', 'Crépuscule'),
-              ),
-              _CircleAction(
-                icon: Icons.bedtime_rounded,
-                label: 'Nuit',
-                color: AppC.night,
-                onTap: () => _previewPhase('night', 'Nuit'),
-              ),
-            ],
+        ),
+        const SizedBox(height: 16),
+        IgnorePointer(
+          ignoring: isBusy,
+          child: Opacity(
+            opacity: isBusy ? 0.55 : 1.0,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _CircleAction(
+                  icon: Icons.wb_sunny_rounded,
+                  label: 'Matin',
+                  color: AppC.sun,
+                  onTap: () => _previewPhase('sunrise', 'Matin'),
+                ),
+                _CircleAction(
+                  icon: Icons.light_mode_rounded,
+                  label: 'Après-midi',
+                  color: const Color(0xFF38BDF8),
+                  onTap: () => _previewPhase('afternoon', 'Après-midi'),
+                ),
+                _CircleAction(
+                  icon: Icons.wb_twilight_rounded,
+                  label: 'Crépuscule',
+                  color: AppC.dusk,
+                  onTap: () => _previewPhase('sunset', 'Crépuscule'),
+                ),
+                _CircleAction(
+                  icon: Icons.bedtime_rounded,
+                  label: 'Nuit',
+                  color: AppC.night,
+                  onTap: () => _previewPhase('night', 'Nuit'),
+                ),
+              ],
+            ),
           ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
+}
 
   Widget _buildPermissions(int missing) {
     return AppCard(

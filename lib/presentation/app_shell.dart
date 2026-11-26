@@ -47,14 +47,14 @@ class _AppShellState extends State<AppShell> {
               return tx(
                 11,
                 w: selected ? FontWeight.w700 : FontWeight.w500,
-                c: selected ? AppC.sky : AppC.muted,
+                c: selected ? AppC.indigo: AppC.muted,
               );
             }),
             iconTheme: WidgetStateProperty.resolveWith((states) {
               final selected = states.contains(WidgetState.selected);
               return IconThemeData(
                 size: 23,
-                color: selected ? AppC.sky : AppC.muted,
+                color: selected ? AppC.indigo : AppC.muted,
               );
             }),
           ),

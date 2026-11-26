@@ -107,7 +107,7 @@ const _modes = [
 ];
 
 const _ringColors = [
-  AppC.sky,
+  AppC.indigo,
   AppC.night,
   AppC.dusk,
   AppC.teal,
@@ -428,7 +428,7 @@ class _SpacePageState extends State<SpacePage> with WidgetsBindingObserver {
             const SizedBox(height: 14),
             FilledButton(
               style: FilledButton.styleFrom(
-                backgroundColor: AppC.sky,
+                backgroundColor: AppC.indigo,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
